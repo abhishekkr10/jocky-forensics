@@ -57,14 +57,33 @@ def sigma(records, operation_id):
     except Unsupported as exc:
         return [], {"engine": "Sigma", "state": "unsupported", "reason": str(exc)}
     eligible = [r for r in records if r["event_kind"] == "process_creation" and r["payload"].get("product") == "windows"]
-    if not eligible:
+    indicators = {
+        "process_injection": ("In-memory execution indicator", "Observed process-injection telemetry"),
+        "api_unhooking": ("Security-monitoring tamper indicator", "Observed API-unhooking telemetry"),
+        "vulnerable_driver": ("Driver risk indicator", "Observed vulnerable-driver telemetry"),
+        "suspicious_lotl": ("Living-off-the-land indicator", "Observed suspicious native-tool telemetry"),
+        "persistence_artifact": ("Persistence indicator", "Observed persistence-artifact telemetry"),
+    }
+    indicator_records = [r for r in records if r.get("event_kind") in indicators]
+    if not eligible and not indicator_records:
         return [], {"engine": "Sigma", "state": "insufficient_telemetry", "pack_digest": pack_digest}
-    matches = native("predicate", {"predicate": predicate, "events": [r["payload"] for r in eligible]})["matches"]
+    matches = native("predicate", {"predicate": predicate, "events": [r["payload"] for r in eligible]})["matches"] if eligible else []
     hits = [{"id": f"sigma-{operation_id}-{i}", "engine": "Sigma", "rule": rule.title, "rule_id": str(rule.id),
              "severity": "medium", "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
              "pack_digest": pack_digest, "engine_version": importlib.metadata.version("pysigma"),
              "provenance_kind": r["provenance_kind"], "reason": "Image ends with powershell.exe and command line contains EncodedCommand"}
             for i, (r, match) in enumerate(zip(eligible, matches)) if match]
+    # Defensive indicator mapping for explicit lab/imported telemetry. These names
+    # describe observed signals; JOCKY never executes the underlying techniques.
+    for r in records:
+        title_reason = indicators.get(r.get("event_kind"))
+        if title_reason:
+            title, reason = title_reason
+            hits.append({"id": f"sigma-{operation_id}-indicator-{len(hits)}", "engine": "Sigma", "rule": title,
+                         "rule_id": f"jocky-defensive-{r['event_kind']}", "severity": "high",
+                         "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
+                         "pack_digest": pack_digest, "engine_version": importlib.metadata.version("pysigma"),
+                         "provenance_kind": r["provenance_kind"], "reason": reason})
     return hits, {"engine": "Sigma", "state": "matched" if hits else "evaluated_no_match", "evaluated": len(eligible), "excluded": len(records)-len(eligible), "pack_digest": pack_digest}
 
 def yara(records, operation_id, blobs):

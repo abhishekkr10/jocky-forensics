@@ -8,7 +8,7 @@ from pathlib import Path
 from backend.app.core import ROOT, native
 from backend.app.engine import run, report_html
 from backend.app import integrity
-from backend.app.detection import compile_sigma, Unsupported
+from backend.app.detection import compile_sigma, sigma, Unsupported
 import pytest
 
 @pytest.fixture(scope="module")
@@ -43,7 +43,12 @@ def test_reproducibility(bundle):
     assert b["analysis"]==bundle["analysis"]
 
 def test_sigma_unsupported():
-    with pytest.raises(Unsupported):compile_sigma("title: Test\nlogsource: {category: process_creation}\ndetection:\n  s:\n    Image|re: '.*'\n  condition: s\n")
+        with pytest.raises(Unsupported):compile_sigma("title: Test\nlogsource: {category: process_creation}\ndetection:\n  s:\n    Image|re: '.*'\n  condition: s\n")
+
+def test_defensive_indicator_mapping():
+    hits, coverage = sigma([{"evidence_id":"e1","event_kind":"vulnerable_driver","payload":{},"provenance_kind":"synthetic"}], "op1")
+    assert coverage["state"] == "matched"
+    assert hits[0]["rule_id"] == "jocky-defensive-vulnerable_driver"
 
 @pytest.mark.parametrize("condition,expected",[("a and not b",[True,False]),("1 of them",[True,True]),("all of them",[False,True]),("(a or b) and a",[True,True])])
 def test_sigma_boolean(condition,expected):

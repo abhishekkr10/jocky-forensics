@@ -92,7 +92,7 @@ def latest_bundle(id,user):
 
 @app.get("/api/v1/examples")
 def examples(user=Depends(current_user)):
-    return {"lab":(ROOT/"examples/triage.jky").read_text(),"live":(ROOT/"examples/live.jky").read_text()}
+    return {"lab":(ROOT/"examples/triage.jky").read_text(),"multi":(ROOT/"examples/multi-endpoint.jky").read_text(),"live":(ROOT/"examples/live.jky").read_text()}
 
 @app.get("/api/v1/endpoints")
 def endpoints(user=Depends(current_user)):

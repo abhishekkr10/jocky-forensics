@@ -40,6 +40,8 @@ cargo run -p jocky-cli -- verify artifacts/triage/bundle.json --trusted-key arti
 
 The lab run is deterministic and harmless. It contains eight labelled synthetic observations, a Sigma finding and a YARA-X match for the harmless marker in `fixtures/lab/demo_files/marker.txt`.
 
+`examples/multi-endpoint.jky` demonstrates bounded multi-endpoint case handling with independent evidence streams. Targets are synthetic lab identifiers; live remote transport is intentionally not enabled.
+
 ## Tests
 
 ```powershell
