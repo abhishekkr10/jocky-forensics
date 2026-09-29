@@ -1,0 +1,21 @@
+# Deterministic, harmless investigation. No techniques are executed.
+mode lab
+target ["WIN-LAB-01"]
+
+collect system_information as host
+collect processes as procs
+collect network_connections as conns
+collect startup_items as startup
+collect event_logs profile="triage" since=24h as logs
+collect files root="demo_files" max_files=100 as files
+
+hunt sigma "triage-v1" on logs as sigma_hits
+scan yara "demo-v1" on files as yara_hits
+simulate process_injection as technique
+
+correlate [procs, conns, startup, logs, files, sigma_hits, yara_hits, technique]
+    using "triage-v1" within 15m as incident
+timeline incident as chronology
+risk incident using "triage-v1" as assessment
+verify evidence
+report html "incident.html"

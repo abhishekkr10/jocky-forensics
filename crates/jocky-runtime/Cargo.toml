@@ -1,0 +1,17 @@
+[package]
+name = "jocky-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+ed25519-dalek = "2.2"
+jocky-ir = { path = "../jocky-ir" }
+jocky-language = { path = "../jocky-language" }
+jocky-evidence = { path = "../jocky-evidence" }
+jocky-collectors = { path = "../jocky-collectors" }
+jocky-detection = { path = "../jocky-detection" }
+jocky-analysis = { path = "../jocky-analysis" }

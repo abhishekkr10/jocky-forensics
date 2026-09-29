@@ -1,0 +1,18 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY);
+CREATE TABLE users(id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('administrator','investigator','reviewer')));
+CREATE TABLE sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires_at REAL NOT NULL);
+CREATE TABLE investigations(id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id), source TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE plans(id TEXT PRIMARY KEY, investigation_id TEXT NOT NULL REFERENCES investigations(id), digest TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE jobs(id TEXT PRIMARY KEY, investigation_id TEXT NOT NULL REFERENCES investigations(id), status TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT, error TEXT, bundle TEXT, cancelled INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX jobs_investigation ON jobs(investigation_id,created_at);
+CREATE TABLE endpoints(id TEXT PRIMARY KEY, hostname TEXT NOT NULL, os TEXT NOT NULL, kind TEXT NOT NULL, last_seen TEXT NOT NULL, capabilities TEXT NOT NULL);
+CREATE TABLE evidence_streams(id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), endpoint_id TEXT NOT NULL REFERENCES endpoints(id), record_count INTEGER NOT NULL, chain_head TEXT NOT NULL, completeness TEXT NOT NULL);
+CREATE TABLE evidence(id TEXT PRIMARY KEY, stream_id TEXT NOT NULL REFERENCES evidence_streams(id), sequence INTEGER NOT NULL, event_time TEXT, artifact_type TEXT NOT NULL, content TEXT NOT NULL, UNIQUE(stream_id,sequence));
+CREATE INDEX evidence_time ON evidence(stream_id,event_time,id);
+CREATE TABLE detections(id TEXT NOT NULL, job_id TEXT NOT NULL REFERENCES jobs(id), content TEXT NOT NULL, PRIMARY KEY(job_id,id));
+CREATE TABLE detection_evidence(job_id TEXT NOT NULL, detection_id TEXT NOT NULL, evidence_id TEXT NOT NULL REFERENCES evidence(id), FOREIGN KEY(job_id,detection_id) REFERENCES detections(job_id,id));
+CREATE TABLE reports(id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), format TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE checkpoints(job_id TEXT PRIMARY KEY REFERENCES jobs(id), content TEXT NOT NULL);
+CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT REFERENCES users(id), action TEXT NOT NULL, subject TEXT, created_at TEXT NOT NULL);
+INSERT INTO schema_migrations VALUES(1);

@@ -1,0 +1,13 @@
+[package]
+name = "jocky-agent"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+jocky-ir = { path = "../jocky-ir" }
+jocky-runtime = { path = "../jocky-runtime" }
+jocky-collectors = { path = "../jocky-collectors" }

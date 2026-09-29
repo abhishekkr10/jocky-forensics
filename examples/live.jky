@@ -1,0 +1,11 @@
+mode live
+target host
+collect system_information as hostinfo
+collect processes max_records=200 as procs
+collect network_connections as conns
+collect startup_items as startup
+correlate [procs, conns, startup] using "triage-v1" within 15m as incident
+timeline incident as chronology
+risk incident using "triage-v1" as assessment
+verify evidence
+report html "live.html"

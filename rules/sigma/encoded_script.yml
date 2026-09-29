@@ -1,0 +1,17 @@
+title: Lab Encoded Script Indicator
+id: 430798eb-15ba-44b5-a26f-1c5b3cf58f40
+status: experimental
+description: Demonstration rule evaluated on explicitly synthetic process telemetry.
+author: JOCKY
+date: 2026-09-30
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: '\powershell.exe'
+    CommandLine|contains: '-EncodedCommand'
+  condition: selection
+level: medium
+tags:
+  - attack.execution

@@ -1,0 +1,2 @@
+JOCKY_HARMLESS_FORENSIC_MARKER_V1
+This file is harmless demonstration evidence. Never executable content.
