@@ -27,7 +27,7 @@ Start the local frontend in another terminal:
 npm.cmd --prefix frontend run dev
 ```
 
-Open `http://127.0.0.1:5173`. On first launch, the generated local credential is written to `data/first-login.txt`; `data/` is ignored and must never be committed.
+Open `http://127.0.0.1:5173`. The local demo login is `investigator` / `test123`; `data/` is ignored and must never be committed.
 
 ## CLI
 
