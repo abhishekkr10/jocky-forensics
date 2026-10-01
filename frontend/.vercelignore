@@ -1,0 +1,10 @@
+dist/
+test-results/
+playwright-report/
+tests/
+playwright.config.ts
+vitest.config.ts
+tsconfig.tsbuildinfo
+src/**/*.test.ts
+src/**/*.test.tsx
+.env*

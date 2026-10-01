@@ -1,17 +1,22 @@
 import { test, expect } from '@playwright/test';
-import fs from 'node:fs';
 import path from 'node:path';
+import fs from 'node:fs';
 
 test('compile, investigate, trace, verify, tamper-copy and report',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
- const credentials=fs.readFileSync(path.resolve('../artifacts/e2e-data/first-login.txt'),'utf8');
- const password=credentials.match(/Password: (.+)/)![1].trim();
+ const credentialPath=path.resolve('../artifacts/e2e-data/first-login.txt');
+ const password=fs.readFileSync(credentialPath,'utf8').match(/^Password: (.+)$/m)![1];
  await page.goto('/');
+ await expect(page.getByRole('heading',{name:'Forensic analysis. Evidence you can trace.'})).toBeVisible();
+ await page.getByRole('link',{name:'Open console',exact:true}).click();
  await page.getByLabel('Username',{exact:true}).fill('investigator');
  await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Overview',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'New investigation',exact:true}).click();
+ expect(fs.existsSync(credentialPath)).toBe(false);
+ const newInvestigation=page.getByRole('button',{name:'New investigation',exact:true});
+ await expect(newInvestigation).toBeEnabled();
+ await newInvestigation.click();
  await expect(page.getByRole('textbox',{name:'JOCKY source editor'})).toBeVisible();
  await page.getByRole('textbox',{name:'JOCKY source editor'}).fill('collect processesx as p');
  await page.getByRole('button',{name:'Check script',exact:true}).click();
@@ -22,7 +27,11 @@ test('compile, investigate, trace, verify, tamper-copy and report',async({page})
  await page.getByRole('button',{name:'Run investigation',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Workspace',exact:true})).toBeVisible({timeout:30000});
  await expect(page.getByText('8 evidence records · 2 detections')).toBeVisible();
- await page.getByRole('button',{name:/Lab Encoded Script Indicator/}).click();
+ await expect(page.getByRole('heading',{name:'Integrity chain'})).toBeVisible();
+ await expect(page.locator('.operation-ledger')).not.toHaveAttribute('open');
+ await page.locator('.operation-ledger summary').click();
+ await expect(page.locator('.operation-ledger')).toHaveAttribute('open','');
+ await page.locator('.finding').filter({hasText:'Lab Encoded Script Indicator'}).click();
  await expect(page.getByLabel('Evidence details',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:/Trace to JOCKY source/}).click();
  await expect(page.getByRole('heading',{name:'JOCKY Editor',exact:true})).toBeVisible();

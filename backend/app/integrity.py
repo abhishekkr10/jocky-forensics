@@ -1,16 +1,34 @@
 import hashlib
 import json
+import os
 import time
 import secrets
+from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives import serialization
 from .core import DATA, native
+
+def key_path():
+    configured = os.environ.get("JOCKY_KEY_PATH")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
+    else:
+        base = Path.home() / ".config"
+    return base / "jocky" / "checkpoint.key"
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
 
 def signing_key():
-    path = DATA / "checkpoint.key"
+    path = key_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = DATA / "checkpoint.key"
+    if legacy.exists() and not path.exists():
+        path.write_bytes(legacy.read_bytes())
+        path.chmod(0o600)
+        legacy.unlink()
     if not path.exists():
         key = Ed25519PrivateKey.generate()
         try:
@@ -22,7 +40,11 @@ def signing_key():
     return Ed25519PrivateKey.from_private_bytes(path.read_bytes())
 
 def public_key():
-    return signing_key().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    path = key_path()
+    if not path.exists():
+        raise FileNotFoundError("Trusted signing key is missing")
+    key = Ed25519PrivateKey.from_private_bytes(path.read_bytes())
+    return key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
 
 def signed_job(plan_digest, operation_id, approved_root, execution_id):
     body={"version":"1.0","plan_digest":plan_digest,"operation_id":operation_id,"approved_root":approved_root,
@@ -30,7 +52,7 @@ def signed_job(plan_digest, operation_id, approved_root, execution_id):
     return {"body":body,"signature":signing_key().sign(canonical(body)).hex()}
 
 def analysis_digest(bundle):
-    return hashlib.sha256(canonical({k:bundle[k] for k in ("source","plan","detections","coverage","operations","analysis","exports")})).hexdigest()
+    return hashlib.sha256(canonical({k:bundle[k] for k in ("run_id","investigation_id","mode","source","plan","detections","coverage","operations","analysis","exports","blobs")})).hexdigest()
 
 def checkpoint(streams, plan_digest, result_digest):
     manifest = {"version": "1.0", "plan_digest": plan_digest, "analysis_digest":result_digest,"streams": [
@@ -40,6 +62,8 @@ def checkpoint(streams, plan_digest, result_digest):
 def verify(bundle, trusted_key=None):
     try:
         cp = bundle["checkpoint"]
+        if set(cp) != {"manifest", "signature", "public_key"} or set(cp["manifest"]) != {"version", "plan_digest", "analysis_digest", "streams"}:
+            raise ValueError("Unexpected checkpoint fields")
         key = trusted_key or public_key()
         if cp["public_key"] != key:
             raise ValueError("Checkpoint signer differs from trusted key")

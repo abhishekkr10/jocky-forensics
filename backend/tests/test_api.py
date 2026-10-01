@@ -44,3 +44,21 @@ def test_reviewer_cannot_write():
         r=c.post("/api/v1/auth/login",json={"username":"reviewer-test","password":"Test-only-password-123"})
         c.headers["X-CSRF-Token"]=r.json()["csrf"]
         assert c.post("/api/v1/investigations",json={"name":"Denied","source":""}).status_code==403
+
+def test_api_docs_require_administrator():
+    with TestClient(app) as c:
+        assert c.get("/docs").status_code==404
+        assert c.get("/openapi.json").status_code==404
+        assert c.get("/api/v1/admin/openapi.json").status_code==401
+        create_user("docs-reviewer","Test-only-password-123","reviewer")
+        login=c.post("/api/v1/auth/login",json={"username":"docs-reviewer","password":"Test-only-password-123"})
+        assert login.status_code==200
+        assert c.get("/api/v1/admin/openapi.json").status_code==403
+        c.post("/api/v1/auth/logout")
+        create_user("docs-admin","Another-test-password-456")
+        login=c.post("/api/v1/auth/login",json={"username":"docs-admin","password":"Another-test-password-456"})
+        assert login.status_code==200
+        assert c.get("/api/v1/admin/openapi.json").status_code==200
+        docs=c.get("/api/v1/admin/docs")
+        assert docs.status_code==200
+        assert "JOCKY API reference" in docs.text

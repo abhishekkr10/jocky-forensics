@@ -1,0 +1,4 @@
+* text=auto
+rules/** text eol=lf
+*.sql text eol=lf
+*.jky text eol=lf

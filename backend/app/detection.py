@@ -68,23 +68,24 @@ def sigma(records, operation_id):
     if not eligible and not indicator_records:
         return [], {"engine": "Sigma", "state": "insufficient_telemetry", "pack_digest": pack_digest}
     matches = native("predicate", {"predicate": predicate, "events": [r["payload"] for r in eligible]})["matches"] if eligible else []
-    hits = [{"id": f"sigma-{operation_id}-{i}", "engine": "Sigma", "rule": rule.title, "rule_id": str(rule.id),
+    hits = [{"id": f"sigma-{operation_id}-{i}", "engine": "Sigma", "rule": rule.title, "rule_id": str(rule.id), "rule_pack_id": "triage-v1", "rule_pack_version": "1.0.0", "rule_pack_digest": pack_digest,
              "severity": "medium", "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
              "pack_digest": pack_digest, "engine_version": importlib.metadata.version("pysigma"),
              "provenance_kind": r["provenance_kind"], "reason": "Image ends with powershell.exe and command line contains EncodedCommand"}
             for i, (r, match) in enumerate(zip(eligible, matches)) if match]
-    # Defensive indicator mapping for explicit lab/imported telemetry. These names
-    # describe observed signals; JOCKY never executes the underlying techniques.
+    sigma_hit_count = len(hits)
+    # Explicit telemetry classification, separate from evaluated Sigma rules.
+    indicator_digest = hashlib.sha256(repr(sorted(indicators.items())).encode()).hexdigest()
     for r in records:
         title_reason = indicators.get(r.get("event_kind"))
         if title_reason:
             title, reason = title_reason
-            hits.append({"id": f"sigma-{operation_id}-indicator-{len(hits)}", "engine": "Sigma", "rule": title,
-                         "rule_id": f"jocky-defensive-{r['event_kind']}", "severity": "high",
+            hits.append({"id": f"indicator-{operation_id}-{len(hits)}", "engine": "JOCKY telemetry", "rule": title,
+                         "rule_id": f"jocky-defensive-{r['event_kind']}", "rule_pack_id": "built-in-indicators", "rule_pack_version": "1.0.0", "rule_pack_digest": indicator_digest, "severity": "high",
                          "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
-                         "pack_digest": pack_digest, "engine_version": importlib.metadata.version("pysigma"),
+                         "pack_digest": indicator_digest, "engine_version": "0.1.0",
                          "provenance_kind": r["provenance_kind"], "reason": reason})
-    return hits, {"engine": "Sigma", "state": "matched" if hits else "evaluated_no_match", "evaluated": len(eligible), "excluded": len(records)-len(eligible), "pack_digest": pack_digest}
+    return hits, {"engine": "Sigma", "state": "matched" if sigma_hit_count else "evaluated_no_match" if eligible else "insufficient_telemetry", "evaluated": len(eligible), "excluded": len(records)-len(eligible), "pack_digest": pack_digest}
 
 def yara(records, operation_id, blobs):
     text = (ROOT / "rules/yara/demo.yar").read_text()
@@ -104,7 +105,7 @@ def yara(records, operation_id, blobs):
             for pattern in match.patterns:
                 for m in pattern.matches:
                     offsets.append({"offset": m.offset, "length": m.length})
-            hits.append({"id": f"yara-{operation_id}-{len(hits)}", "engine": "YARA-X", "rule": match.identifier,
+            hits.append({"id": f"yara-{operation_id}-{len(hits)}", "engine": "YARA-X", "rule": match.identifier, "rule_pack_id": "demo-v1", "rule_pack_version": "1.0.0", "rule_pack_digest": hashlib.sha256(text.encode()).hexdigest(),
                          "namespace": match.namespace, "severity": "low", "evidence_ids": [record["evidence_id"]],
                          "operation_id": operation_id, "scanned_sha256": digest, "offsets": offsets,
                          "pack_digest": hashlib.sha256(text.encode()).hexdigest(), "engine_version": importlib.metadata.version("yara-x"),

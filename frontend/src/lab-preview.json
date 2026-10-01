@@ -1,0 +1,811 @@
+{
+  "source": "# Deterministic, harmless investigation. No techniques are executed.\nmode lab\ntarget [\"WIN-LAB-01\"]\n\ncollect system_information as host\ncollect processes as procs\ncollect network_connections as conns\ncollect startup_items as startup\ncollect event_logs profile=\"triage\" since=24h as logs\ncollect files root=\"demo_files\" max_files=100 as files\n\nhunt sigma \"triage-v1\" on logs as sigma_hits\nscan yara \"demo-v1\" on files as yara_hits\nsimulate process_injection as technique\n\ncorrelate [procs, conns, startup, logs, files, sigma_hits, yara_hits, technique]\n    using \"triage-v1\" within 15m as incident\ntimeline incident as chronology\nrisk incident using \"triage-v1\" as assessment\nverify evidence\nreport html \"incident.html\"\n",
+  "evidence": [
+    {
+      "artifact_type": "system_information",
+      "collected_at": "2026-09-30T10:31:00Z",
+      "collection_status": "success",
+      "collector_id": "system_information",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": null
+      },
+      "event_kind": "system_information",
+      "event_time": null,
+      "evidence_id": "documentation-lab:WIN-LAB-01:op001:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:00Z",
+      "operation_id": "op001",
+      "payload": {
+        "hostname": "WIN-LAB-01",
+        "os": "Windows lab fixture",
+        "summary": "Synthetic endpoint context"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:00Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 135,
+        "line": 5,
+        "start": 101
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "observation",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "718baade104546da4e4fe9d7eeb0a6d34d4e566b88735a709084b84282768b77",
+      "sequence": 1,
+      "previous_hash": "94824faa3dd425b70168d228c2b7a39b378f814a165f80a6b43d0cf2d70e1d3a",
+      "current_hash": "edd73a68a271449902d8330c4af82cc45f1a1ec7b8ccf251c3e25f98063f76cb"
+    },
+    {
+      "artifact_type": "processes",
+      "collected_at": "2026-09-30T10:31:03Z",
+      "collection_status": "success",
+      "collector_id": "processes",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z"
+      },
+      "event_kind": "processes",
+      "event_time": null,
+      "evidence_id": "documentation-lab:WIN-LAB-01:op002:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:03Z",
+      "operation_id": "op002",
+      "payload": {
+        "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "name": "powershell.exe",
+        "pid": 4242,
+        "ppid": 4100,
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z",
+        "summary": "Synthetic PowerShell process snapshot"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:03Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 162,
+        "line": 6,
+        "start": 136
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "observation",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "8e463946976af57759792c4e50c6de7f888684cee5c4631205f25f55e7efc9d3",
+      "sequence": 2,
+      "previous_hash": "edd73a68a271449902d8330c4af82cc45f1a1ec7b8ccf251c3e25f98063f76cb",
+      "current_hash": "149c902ef0d592de9dfb413c9ee29895fe01b2d65cd8cfbdd93b70af656004ef"
+    },
+    {
+      "artifact_type": "network_connections",
+      "collected_at": "2026-09-30T10:31:06Z",
+      "collection_status": "success",
+      "collector_id": "network_connections",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z"
+      },
+      "event_kind": "network_connections",
+      "event_time": "2026-09-30T10:31:06Z",
+      "evidence_id": "documentation-lab:WIN-LAB-01:op003:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:06Z",
+      "operation_id": "op003",
+      "payload": {
+        "destination": "203.0.113.25",
+        "port": 443,
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z",
+        "protocol": "tcp",
+        "source": "192.0.2.10",
+        "summary": "Synthetic outbound TLS connection"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:06Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 199,
+        "line": 7,
+        "start": 163
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "event",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "b1a8fdf919598b2e26c4e50400305282bf03a186af5ec60bfaf80f4ab49e4d47",
+      "sequence": 3,
+      "previous_hash": "149c902ef0d592de9dfb413c9ee29895fe01b2d65cd8cfbdd93b70af656004ef",
+      "current_hash": "0540a27a87be64ecdb0a2aa79b358a75b9ab737072f489b4cb15e59991e00162"
+    },
+    {
+      "artifact_type": "startup_items",
+      "collected_at": "2026-09-30T10:31:09Z",
+      "collection_status": "success",
+      "collector_id": "startup_items",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": null
+      },
+      "event_kind": "startup_items",
+      "event_time": null,
+      "evidence_id": "documentation-lab:WIN-LAB-01:op004:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:09Z",
+      "operation_id": "op004",
+      "payload": {
+        "path": "C:\\Lab\\Startup\\example.lnk",
+        "summary": "Synthetic startup artifact; never created or executed"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:09Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 232,
+        "line": 8,
+        "start": 200
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "observation",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "ea522eaac9d1209a220c586b1f60bbb5a5d633c9f49a39b5cda2bbf00ec870be",
+      "sequence": 4,
+      "previous_hash": "0540a27a87be64ecdb0a2aa79b358a75b9ab737072f489b4cb15e59991e00162",
+      "current_hash": "79797b94568e2e6f57cf286fb43756f086ce8c55f88eb8bd663e5d459a5fea38"
+    },
+    {
+      "artifact_type": "event_logs",
+      "collected_at": "2026-09-30T10:31:12Z",
+      "collection_status": "success",
+      "collector_id": "event_logs",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z"
+      },
+      "event_kind": "process_creation",
+      "event_time": "2026-09-30T10:31:12Z",
+      "evidence_id": "documentation-lab:WIN-LAB-01:op005:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:12Z",
+      "operation_id": "op005",
+      "payload": {
+        "CommandLine": "powershell.exe -EncodedCommand LAB_NON_EXECUTABLE_PLACEHOLDER",
+        "Image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "ParentImage": "C:\\Lab\\document_viewer.exe",
+        "event_kind": "process_creation",
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z",
+        "product": "windows",
+        "summary": "Synthetic encoded-script process creation"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:12Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 286,
+        "line": 9,
+        "start": 233
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "event",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "976d95ddf85875309a07abe9d12c8df6713d6adf0874a8578a39302bd0ba132c",
+      "sequence": 5,
+      "previous_hash": "79797b94568e2e6f57cf286fb43756f086ce8c55f88eb8bd663e5d459a5fea38",
+      "current_hash": "dda03496f255f901bfab6fdfdb506c8f2169b7130425b704d26e90b2c1686860"
+    },
+    {
+      "artifact_type": "event_logs",
+      "collected_at": "2026-09-30T10:31:15Z",
+      "collection_status": "success",
+      "collector_id": "event_logs",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": null
+      },
+      "event_kind": "process_creation",
+      "event_time": "2026-09-30T10:31:15Z",
+      "evidence_id": "documentation-lab:WIN-LAB-01:op005:1",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:15Z",
+      "operation_id": "op005",
+      "payload": {
+        "CommandLine": "notepad.exe",
+        "Image": "C:\\Windows\\notepad.exe",
+        "event_kind": "process_creation",
+        "product": "windows",
+        "summary": "Benign synthetic control event"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:15Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 286,
+        "line": 9,
+        "start": 233
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "event",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "b55623ba3d4cb4af1f5b9f0618143bd25ea6727d4847e9c8dedea46e2cf5735d",
+      "sequence": 6,
+      "previous_hash": "dda03496f255f901bfab6fdfdb506c8f2169b7130425b704d26e90b2c1686860",
+      "current_hash": "117a0b1c75a4fadb61952616041e2e4efca74d85b8bfb132bc8d340e58cfe4de"
+    },
+    {
+      "artifact_type": "files",
+      "collected_at": "2026-09-30T10:31:18Z",
+      "collection_status": "success",
+      "collector_id": "files",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": null
+      },
+      "event_kind": "files",
+      "event_time": null,
+      "evidence_id": "documentation-lab:WIN-LAB-01:op006:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:18Z",
+      "operation_id": "op006",
+      "payload": {
+        "path": "lab://demo_files/marker.txt",
+        "sha256": "0414ae54a19970b947f08d575361b73636c27d9503622900fbbddd13b18c3128",
+        "size": 106,
+        "summary": "Harmless lab marker file"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": {
+        "blob_sha256": "0414ae54a19970b947f08d575361b73636c27d9503622900fbbddd13b18c3128"
+      },
+      "received_at": "2026-09-30T10:31:18Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 341,
+        "line": 10,
+        "start": 287
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "observation",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "bff0bf42d4b4d3306b7203a4bd1189ad9c733b4b2cf494fd564756c4f2077ae5",
+      "sequence": 7,
+      "previous_hash": "117a0b1c75a4fadb61952616041e2e4efca74d85b8bfb132bc8d340e58cfe4de",
+      "current_hash": "822c2c340d9d38c3368390bc1ec4e1732cce95c7721f00cf52f85c23516beb5b"
+    },
+    {
+      "artifact_type": "process_injection",
+      "collected_at": "2026-09-30T10:31:21Z",
+      "collection_status": "success",
+      "collector_id": "process_injection",
+      "collector_version": "0.1.0",
+      "endpoint_id": "WIN-LAB-01",
+      "entities": {
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z"
+      },
+      "event_kind": "process_injection",
+      "event_time": "2026-09-30T10:31:21Z",
+      "evidence_id": "documentation-lab:WIN-LAB-01:op009:0",
+      "execution_id": "documentation-lab",
+      "investigation_id": "documentation-example",
+      "observed_at": "2026-09-30T10:31:21Z",
+      "operation_id": "op009",
+      "payload": {
+        "event_kind": "process_injection",
+        "process_key": "lab-boot:4242:2026-09-30T10:31:02Z",
+        "summary": "Synthetic process_injection telemetry \u2014 no technique executed"
+      },
+      "provenance_kind": "synthetic",
+      "raw_reference": null,
+      "received_at": "2026-09-30T10:31:21Z",
+      "scenario_id": "triage-v1",
+      "schema_version": "1.0",
+      "source_span": {
+        "column": 1,
+        "end": 469,
+        "line": 14,
+        "start": 430
+      },
+      "time_metadata": {
+        "precision": "seconds",
+        "timestamp_meaning": "event",
+        "uncertainty": "fixture"
+      },
+      "warnings": [],
+      "record_digest": "de3394168d7dc2e4a5c6337ba941cb8e813065b425e52379f86b097534a3bfe4",
+      "sequence": 8,
+      "previous_hash": "822c2c340d9d38c3368390bc1ec4e1732cce95c7721f00cf52f85c23516beb5b",
+      "current_hash": "cc20d5bfd5627f7993880aff7d8be067664b435d976861eedafa4802e93ede50"
+    }
+  ],
+  "detections": [
+    {
+      "id": "WIN-LAB-01:sigma-op007-0",
+      "engine": "Sigma",
+      "rule": "Lab Encoded Script Indicator",
+      "rule_id": "430798eb-15ba-44b5-a26f-1c5b3cf58f40",
+      "rule_pack_id": "triage-v1",
+      "rule_pack_version": "1.0.0",
+      "rule_pack_digest": "5747629f5e753600885dee0018e5e0535131423b7de5bd2ff9302ebb5aaaa19d",
+      "severity": "medium",
+      "evidence_ids": [
+        "documentation-lab:WIN-LAB-01:op005:0"
+      ],
+      "operation_id": "op007",
+      "pack_digest": "5747629f5e753600885dee0018e5e0535131423b7de5bd2ff9302ebb5aaaa19d",
+      "engine_version": "1.5.1",
+      "provenance_kind": "synthetic",
+      "reason": "Image ends with powershell.exe and command line contains EncodedCommand"
+    },
+    {
+      "id": "WIN-LAB-01:yara-op008-0",
+      "engine": "YARA-X",
+      "rule": "Jocky_Harmless_Lab_Marker",
+      "rule_pack_id": "demo-v1",
+      "rule_pack_version": "1.0.0",
+      "rule_pack_digest": "eafc3ffd94a7c925fb8cadc8ed322e42622de77e6a0a29334909cdace49aa401",
+      "namespace": "default",
+      "severity": "low",
+      "evidence_ids": [
+        "documentation-lab:WIN-LAB-01:op006:0"
+      ],
+      "operation_id": "op008",
+      "scanned_sha256": "0414ae54a19970b947f08d575361b73636c27d9503622900fbbddd13b18c3128",
+      "offsets": [
+        {
+          "offset": 0,
+          "length": 33
+        }
+      ],
+      "pack_digest": "eafc3ffd94a7c925fb8cadc8ed322e42622de77e6a0a29334909cdace49aa401",
+      "engine_version": "1.21.0",
+      "provenance_kind": "synthetic",
+      "reason": "Harmless demonstration marker found in captured file bytes"
+    }
+  ],
+  "analysis": {
+    "edges": [
+      {
+        "confidence": "high",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op002:0",
+          "documentation-lab:WIN-LAB-01:op003:0"
+        ],
+        "profile": "triage-v1",
+        "reason": "Same endpoint and stable process identity",
+        "source": "documentation-lab:WIN-LAB-01:op002:0",
+        "target": "documentation-lab:WIN-LAB-01:op003:0"
+      },
+      {
+        "confidence": "high",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op002:0",
+          "documentation-lab:WIN-LAB-01:op005:0"
+        ],
+        "profile": "triage-v1",
+        "reason": "Same endpoint and stable process identity",
+        "source": "documentation-lab:WIN-LAB-01:op002:0",
+        "target": "documentation-lab:WIN-LAB-01:op005:0"
+      },
+      {
+        "confidence": "high",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op002:0",
+          "documentation-lab:WIN-LAB-01:op009:0"
+        ],
+        "profile": "triage-v1",
+        "reason": "Same endpoint and stable process identity",
+        "source": "documentation-lab:WIN-LAB-01:op002:0",
+        "target": "documentation-lab:WIN-LAB-01:op009:0"
+      },
+      {
+        "confidence": "high",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op005:0"
+        ],
+        "profile": "triage-v1",
+        "reason": "Rule evaluated this evidence",
+        "source": "documentation-lab:WIN-LAB-01:op005:0",
+        "target": "WIN-LAB-01:sigma-op007-0"
+      },
+      {
+        "confidence": "high",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op006:0"
+        ],
+        "profile": "triage-v1",
+        "reason": "Rule evaluated this evidence",
+        "source": "documentation-lab:WIN-LAB-01:op006:0",
+        "target": "WIN-LAB-01:yara-op008-0"
+      }
+    ],
+    "risk": {
+      "contributions": [
+        {
+          "detection_id": "WIN-LAB-01:sigma-op007-0",
+          "points": 25,
+          "reason": "Sigma detection family"
+        },
+        {
+          "detection_id": "WIN-LAB-01:yara-op008-0",
+          "points": 25,
+          "reason": "YARA-X detection family"
+        }
+      ],
+      "disclaimer": "Triage heuristic, not probability of compromise. Missing telemetry is not evidence of low risk.",
+      "label": "LAB RISK SCORE",
+      "score": 50
+    },
+    "timeline": [
+      {
+        "detection_ids": [],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": null,
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op002:0"
+        ],
+        "observed_at": "2026-09-30T10:31:03Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:03Z",
+        "summary": "Synthetic PowerShell process snapshot",
+        "time_kind": "observation",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": "2026-09-30T10:31:06Z",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op003:0"
+        ],
+        "observed_at": "2026-09-30T10:31:06Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:06Z",
+        "summary": "Synthetic outbound TLS connection",
+        "time_kind": "event",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": null,
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op004:0"
+        ],
+        "observed_at": "2026-09-30T10:31:09Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:09Z",
+        "summary": "Synthetic startup artifact; never created or executed",
+        "time_kind": "observation",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [
+          "WIN-LAB-01:sigma-op007-0"
+        ],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": "2026-09-30T10:31:12Z",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op005:0"
+        ],
+        "observed_at": "2026-09-30T10:31:12Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:12Z",
+        "summary": "Synthetic encoded-script process creation",
+        "time_kind": "event",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": "2026-09-30T10:31:15Z",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op005:1"
+        ],
+        "observed_at": "2026-09-30T10:31:15Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:15Z",
+        "summary": "Benign synthetic control event",
+        "time_kind": "event",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [
+          "WIN-LAB-01:yara-op008-0"
+        ],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": null,
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op006:0"
+        ],
+        "observed_at": "2026-09-30T10:31:18Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:18Z",
+        "summary": "Harmless lab marker file",
+        "time_kind": "observation",
+        "uncertainty": "fixture"
+      },
+      {
+        "detection_ids": [],
+        "endpoint_id": "WIN-LAB-01",
+        "event_time": "2026-09-30T10:31:21Z",
+        "evidence_ids": [
+          "documentation-lab:WIN-LAB-01:op009:0"
+        ],
+        "observed_at": "2026-09-30T10:31:21Z",
+        "provenance_kind": "synthetic",
+        "sort_time": "2026-09-30T10:31:21Z",
+        "summary": "Synthetic process_injection telemetry \u2014 no technique executed",
+        "time_kind": "event",
+        "uncertainty": "fixture"
+      }
+    ]
+  },
+  "coverage": [
+    {
+      "engine": "Sigma",
+      "state": "matched",
+      "evaluated": 2,
+      "excluded": 0,
+      "pack_digest": "5747629f5e753600885dee0018e5e0535131423b7de5bd2ff9302ebb5aaaa19d"
+    },
+    {
+      "engine": "YARA-X",
+      "state": "matched",
+      "evaluated": 1
+    }
+  ],
+  "operations": [
+    {
+      "id": "op001",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 135,
+        "line": 5,
+        "start": 101
+      }
+    },
+    {
+      "id": "op002",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 162,
+        "line": 6,
+        "start": 136
+      }
+    },
+    {
+      "id": "op003",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 199,
+        "line": 7,
+        "start": 163
+      }
+    },
+    {
+      "id": "op004",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 232,
+        "line": 8,
+        "start": 200
+      }
+    },
+    {
+      "id": "op005",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 2,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 286,
+        "line": 9,
+        "start": 233
+      }
+    },
+    {
+      "id": "op006",
+      "opcode": "collect",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 341,
+        "line": 10,
+        "start": 287
+      }
+    },
+    {
+      "id": "op007",
+      "opcode": "hunt",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 387,
+        "line": 12,
+        "start": 343
+      }
+    },
+    {
+      "id": "op008",
+      "opcode": "scan",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 429,
+        "line": 13,
+        "start": 388
+      }
+    },
+    {
+      "id": "op009",
+      "opcode": "simulate",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 469,
+        "line": 14,
+        "start": 430
+      }
+    },
+    {
+      "id": "op010",
+      "opcode": "correlate",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 596,
+        "line": 16,
+        "start": 471
+      }
+    },
+    {
+      "id": "op011",
+      "opcode": "timeline",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 7,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 628,
+        "line": 18,
+        "start": 597
+      }
+    },
+    {
+      "id": "op012",
+      "opcode": "risk",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 1,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 674,
+        "line": 19,
+        "start": 629
+      }
+    },
+    {
+      "id": "op013",
+      "opcode": "verify",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 0,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 690,
+        "line": 20,
+        "start": 675
+      }
+    },
+    {
+      "id": "op014",
+      "opcode": "report",
+      "endpoint_id": "WIN-LAB-01",
+      "status": "success",
+      "count": 0,
+      "warnings": [],
+      "source_span": {
+        "column": 1,
+        "end": 718,
+        "line": 21,
+        "start": 691
+      }
+    }
+  ],
+  "verification": {
+    "integrity": "valid",
+    "completeness": "complete",
+    "anchor": "server signing key; export checkpoint independently"
+  }
+}

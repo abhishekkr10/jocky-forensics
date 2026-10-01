@@ -34,3 +34,4 @@ coverage/
 !.env.example
 playwright/.auth/
 /screenshots/
+.vercel/

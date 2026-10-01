@@ -41,9 +41,10 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
         if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise ValueError("Rule pack changed since compiler build; rebuild the compiler to pin the new pack")
     analysis = {"timeline": [], "edges": [], "risk": {"score": 0, "label": "NOT CALCULATED", "contributions": []}}
+    analyses = []
     streams = []
-    complete = True
     for endpoint in plan["target_selector"]:
+        complete = True
         if endpoint == "host":
             import socket
             endpoint = socket.gethostname()
@@ -142,6 +143,7 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
                     ta,tb=(datetime.fromisoformat((r["event_time"] or r["observed_at"]).replace("Z","+00:00")) for r in (a,b))
                     return abs((ta-tb).total_seconds()) <= args["window_seconds"]
                 analysis["edges"] = [e for e in analysis["edges"] if in_window(e)]
+                analyses.append(analysis)
                 result = [analysis]
             elif op == "timeline": result = inputs[0]["timeline"]
             elif op == "risk": result = [inputs[0]["risk"]]
@@ -161,6 +163,12 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
             operations.append({"id": node["id"], "opcode": op, "endpoint_id": endpoint, "status": status,
                                "count": len(result), "warnings": warnings, "source_span": plan["source_map"][node["id"]]})
         streams.append(native("seal", {"stream_id": f"{run_id}:{endpoint}", "records": endpoint_records, "complete": complete}))
+    if len(analyses) > 1:
+        analysis = {"timeline": sorted((event for part in analyses for event in part["timeline"]), key=lambda event: (event.get("event_time") or event.get("observed_at") or "", event.get("evidence_ids", []))),
+                    "edges": [edge for part in analyses for edge in part["edges"]],
+                    "risk": {"score": min(100, sum(part["risk"]["score"] for part in analyses)),
+                             "label": analyses[0]["risk"]["label"],
+                             "contributions": [contribution for part in analyses for contribution in part["risk"]["contributions"]]}}
     bundle = {"version": "1.0", "run_id": run_id, "investigation_id": investigation_id, "mode": plan["mode"],
               "source": source, "plan": plan, "plan_digest": compiled["plan_digest"], "streams": streams, "blobs": blobs,
               "detections": detections, "coverage": coverage, "operations": operations, "analysis": analysis,"exports":exports}

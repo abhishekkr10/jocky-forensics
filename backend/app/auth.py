@@ -12,8 +12,7 @@ HASHER = PasswordHasher()
 def token_hash(value): return hashlib.sha256(value.encode()).hexdigest()
 
 def create_user(username, password, role="administrator"):
-    # The bootstrap investigator is intentionally simple for local demo use.
-    if len(password) < 12 and password != "test123": raise ValueError("Password must have at least 12 characters")
+    if len(password) < 12: raise ValueError("Password must have at least 12 characters")
     with connection() as db:
         db.execute("INSERT INTO users VALUES(?,?,?,?)", (str(uuid.uuid4()),username,HASHER.hash(password),role))
 
@@ -21,11 +20,15 @@ def bootstrap():
     with connection() as db:
         exists = db.execute("SELECT 1 FROM users LIMIT 1").fetchone()
     if not exists:
-        password = "test123"
+        password = secrets.token_urlsafe(24)
         create_user("investigator", password)
         path = DATA / "first-login.txt"
         path.write_text(f"Username: investigator\nPassword: {password}\nDelete this file after saving the credential.\n")
         path.chmod(0o600)
+
+def clear_first_login_credential(username):
+    if username == "investigator":
+        (DATA / "first-login.txt").unlink(missing_ok=True)
 
 def current_user(request: Request):
     token = request.cookies.get("jocky_session", "")
@@ -38,3 +41,7 @@ def current_user(request: Request):
 
 def writer(user):
     if user["role"] not in {"administrator","investigator"}: raise HTTPException(403,"Investigator role required")
+
+def administrator(user):
+    if user["role"] != "administrator": raise HTTPException(403,"Administrator role required")
+    return user

@@ -23,7 +23,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
       - name: Rust tests
-        run: cargo test --workspace
+        run: |
+          cargo build --workspace
+          cargo test --workspace
       - name: Backend tests
         run: python -m pytest -q
       - name: Frontend build and unit tests

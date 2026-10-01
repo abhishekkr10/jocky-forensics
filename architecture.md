@@ -3,8 +3,8 @@
 Defensive forensic DSL. No shell opcode, evasion, offensive execution or automatic elevation.
 
 ## Contracts
-Rust language -> spanned AST -> semantic validation -> deterministic JSON IR -> bounded runtime -> immutable evidence -> detections -> indexed correlation -> timeline/risk -> report.
-FastAPI owns authentication, SQLite persistence and jobs. React/TypeScript/Vite + CodeMirror consumes real API results. Synthetic evidence is always labelled and separate from live collection.
+Rust language -> spanned AST -> semantic validation -> deterministic JSON IR -> bounded runtime -> immutable evidence -> detections -> indexed correlation -> persisted correlation/timeline records -> timeline/risk -> report.
+FastAPI owns authentication, SQLite persistence and jobs. React/TypeScript/Vite + CodeMirror consumes real API results. The public landing page and console share a frontend build. The console is entered through `/#/app` and requests credentials only after a successful same-origin backend health check. The deployed public frontend currently has no hosted investigation backend. Its reference lab demo uses a captured, labelled synthetic result. Synthetic evidence is always labelled and separate from live collection.
 
 ## Modules
 - jocky-ir: versioned plans, nodes, source spans, canonical hashing.
@@ -15,14 +15,14 @@ FastAPI owns authentication, SQLite persistence and jobs. React/TypeScript/Vite 
 - jocky-analysis: evidence relationships, timestamp-aware timeline, explainable score.
 - jocky-runtime: validated operation execution; lab fixtures never execute techniques.
 - jocky-cli / jocky-agent: local CLI and restricted agent entrypoint.
-- backend: FastAPI, SQLAlchemy/SQLite, migrations, session auth, signed checkpoints.
+- backend: FastAPI, SQLite migrations, session auth, signed checkpoints, persisted correlation and timeline records.
 - frontend: editor, workspace, evidence/detection trace, timeline, integrity, reports.
 
 ## Integrity and trust
-Canonical JSON uses sorted keys, integer/string values and explicit nulls. SHA-256 chain binds stream identity, sequence and record digest. A signed completion checkpoint binds expected streams/counts/heads. Independently retained public key/checkpoint is the trust anchor. Integrity and collection completeness are separate. A signature does not establish endpoint truthfulness.
+Canonical JSON uses sorted keys, integer/string values and explicit nulls. SHA-256 chain binds stream identity, sequence and record digest. A signed completion checkpoint binds expected streams/counts/heads and the analysis digest, including run identity, mode and captured blobs. Workspace, evidence, detection and report bundle reads are verified before use. Timeline and correlation views currently read normalized analysis tables; independent integrity checks for those derived rows remain a gap. Independently retained public key/checkpoint is the trust anchor. Integrity and collection completeness are separate. A signature does not establish endpoint truthfulness.
 
 ## Deployment
-Local native Windows/Ubuntu processes, SQLite and filesystem blobs; no distributed infrastructure. Release binaries on endpoints. Platform support is only claimed where tested. Resource and path bounds enforced at execution as well as compilation. Read-oriented collection can affect live host state.
+The investigation runtime uses local native Windows/Ubuntu processes, SQLite and filesystem blobs; no distributed infrastructure. The optional static public preview can be hosted separately and has no access to case data. The coordinator currently invokes a repository-local debug worker. Release binaries can be built, but distributed endpoint deployment is not implemented. Platform support is only claimed where tested. Resource and path bounds enforced at execution as well as compilation. Read-oriented collection can affect live host state.
 
 ## Scope
 CURRENT_STATUS.md records the implemented subset and verification commands. Unsupported constructs fail explicitly rather than behaving as no-ops.

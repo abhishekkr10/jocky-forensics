@@ -9,11 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from .core import ROOT, native
+from .core import ROOT, native, DATA
 from .db import initialize, connection, audit, now
-from .auth import bootstrap, current_user, writer, HASHER, token_hash
+from .auth import bootstrap, current_user, writer, administrator, clear_first_login_credential, HASHER, token_hash
 from . import engine, integrity
 
 POOL = ThreadPoolExecutor(max_workers=2)
@@ -22,7 +23,7 @@ async def lifespan(app):
     initialize(); bootstrap(); integrity.signing_key()
     yield
 
-app = FastAPI(title="JOCKY forensic investigation API",version="0.1.0",lifespan=lifespan)
+app = FastAPI(title="JOCKY forensic investigation API",version="0.1.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 
 @app.middleware("http")
 async def boundaries(request: Request, call_next):
@@ -32,6 +33,7 @@ async def boundaries(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
+    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
     return response
 
 class Login(BaseModel):
@@ -62,6 +64,7 @@ def login(body: Login, request: Request, response: Response):
         except Exception:
             LOGIN_FAILURES[key]=failures+[time.time()]
             raise HTTPException(401,"Invalid credentials")
+        clear_first_login_credential(user["username"])
         token, csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(24)
         db.execute("INSERT INTO sessions VALUES(?,?,?,?)",(token_hash(token),user["id"],csrf,time.time()+8*3600))
     response.set_cookie("jocky_session",token,httponly=True,samesite="strict",secure=os.environ.get("JOCKY_HTTPS")=="1",max_age=8*3600)
@@ -84,11 +87,21 @@ def investigation(id,user):
     if user["role"]=="investigator" and row["owner_id"]!=user["id"]: raise HTTPException(403,"Investigation access denied")
     return dict(row)
 
-def latest_bundle(id,user):
+def latest_bundle(id,user,require_valid=True):
     investigation(id,user)
     with connection() as db: row=db.execute("SELECT bundle FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
     if not row: raise HTTPException(409,"No completed run")
-    return json.loads(row["bundle"])
+    bundle=json.loads(row["bundle"])
+    result=integrity.verify(bundle)
+    bundle["verification"]=result
+    if require_valid and result["integrity"]!="valid": raise HTTPException(409,"Stored evidence failed integrity verification")
+    return bundle
+
+def latest_job(id,user):
+    investigation(id,user)
+    with connection() as db: row=db.execute("SELECT id FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
+    if not row: raise HTTPException(409,"No completed run")
+    return dict(row)
 
 @app.get("/api/v1/examples")
 def examples(user=Depends(current_user)):
@@ -151,6 +164,16 @@ def execute_job(job_id, inv, user_id):
             for d in bundle["detections"]:
                 db.execute("INSERT INTO detections VALUES(?,?,?)",(d["id"],job_id,json.dumps(d)))
                 for eid in d["evidence_ids"]: db.execute("INSERT INTO detection_evidence VALUES(?,?,?)",(job_id,d["id"],eid))
+            for i, edge in enumerate(bundle["analysis"].get("edges", [])):
+                source_ids=edge.get("evidence_ids", [edge.get("source")])[:1]
+                target_ids=edge.get("evidence_ids", [edge.get("target")])[1:2] or [edge.get("target")]
+                db.execute("INSERT INTO correlations VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
+                    f"{job_id}:corr:{i}",inv["id"],job_id,
+                    next((x["record"]["endpoint_id"] for s in bundle["streams"] for x in s["entries"] if x["record"]["evidence_id"] in source_ids),"coordinator"),
+                    json.dumps(source_ids),json.dumps(target_ids),"evidence", "evidence", "related", edge.get("reason",""),edge.get("confidence","unknown"),edge.get("profile","triage-v1"),now(),json.dumps({"kind":"derived","provenance": "backend-analysis"})))
+            for i, event in enumerate(bundle["analysis"].get("timeline", [])):
+                db.execute("INSERT INTO timeline_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
+                    f"{job_id}:timeline:{i}",inv["id"],job_id,event.get("endpoint_id","unknown"),event.get("event_time"),event.get("observed_at"),event.get("observed_at"),event.get("time_kind","observation"),event.get("uncertainty","unmeasured"),event.get("event_type","observation"),json.dumps(event.get("evidence_ids",[])),json.dumps(event.get("detection_ids",[])),event.get("provenance_kind","unknown"),event.get("summary","")))
             db.execute("INSERT INTO checkpoints VALUES(?,?)",(job_id,json.dumps(bundle["checkpoint"])))
             db.execute("UPDATE jobs SET status='completed',completed_at=?,bundle=? WHERE id=?",(now(),json.dumps(bundle),job_id))
             for node in bundle["plan"]["nodes"]:
@@ -203,16 +226,30 @@ def evidence(id:str,offset:int=0,limit:int=200,user=Depends(current_user)):
 @app.get("/api/v1/investigations/{id}/detections")
 def detections(id:str,user=Depends(current_user)): return latest_bundle(id,user)["detections"]
 @app.get("/api/v1/investigations/{id}/timeline")
-def timeline(id:str,user=Depends(current_user)): return latest_bundle(id,user)["analysis"]["timeline"]
+def timeline(id:str,user=Depends(current_user)):
+    job=latest_job(id,user)
+    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM timeline_events WHERE analysis_run_id=? ORDER BY COALESCE(event_time,observed_at),timeline_event_id",(job["id"],))]
+    for r in rows:
+        r["evidence_ids"]=json.loads(r["evidence_ids"]);r["detection_ids"]=json.loads(r["detection_ids"])
+        r["time_kind"]=r["timestamp_meaning"];r["provenance_kind"]=r["provenance"]
+    return rows
 @app.get("/api/v1/investigations/{id}/correlations")
-def correlations(id:str,user=Depends(current_user)): return latest_bundle(id,user)["analysis"]["edges"]
+def correlations(id:str,user=Depends(current_user)):
+    job=latest_job(id,user)
+    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM correlations WHERE analysis_run_id=? ORDER BY created_at,correlation_id",(job["id"],))]
+    for r in rows:
+        r["source_evidence_ids"]=json.loads(r["source_evidence_ids"]);r["target_evidence_ids"]=json.loads(r["target_evidence_ids"]);r["provenance"]=json.loads(r["provenance"])
+        r["source"]=r["source_evidence_ids"][0] if r["source_evidence_ids"] else "";r["target"]=r["target_evidence_ids"][0] if r["target_evidence_ids"] else ""
+        r["evidence_ids"]=list(dict.fromkeys(r["source_evidence_ids"]+r["target_evidence_ids"]))
+        r["profile"]=r["profile_version"]
+    return rows
 @app.get("/api/v1/investigations/{id}/processes")
 def processes(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="processes"]
 @app.get("/api/v1/investigations/{id}/network")
 def network(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="network_connections"]
 @app.post("/api/v1/investigations/{id}/verify")
 def verify(id:str,user=Depends(current_user)):
-    result=integrity.verify(latest_bundle(id,user));audit(user["id"],"integrity.verified",id);return result
+    result=integrity.verify(latest_bundle(id,user,require_valid=False));audit(user["id"],"integrity.verified",id);return result
 @app.post("/api/v1/investigations/{id}/tamper-test")
 def tamper(id:str,user=Depends(current_user)):
     writer(user);b=copy.deepcopy(latest_bundle(id,user))
@@ -249,9 +286,21 @@ def audits(user=Depends(current_user)):
     with connection() as db: return [dict(r) for r in db.execute("SELECT action,subject,created_at FROM audit_logs WHERE ?='administrator' OR user_id=? ORDER BY id DESC LIMIT 100",(user["role"],user["id"]))]
 @app.get("/api/v1/rule-packs")
 def rules(user=Depends(current_user)):
-    return [{"id":name,"engine":eng,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"source":path.read_text()} for name,eng,path in [("triage-v1","Sigma",ROOT/"rules/sigma/encoded_script.yml"),("demo-v1","YARA-X",ROOT/"rules/yara/demo.yar")]]
+    return [{"pack_id":name,"id":name,"name":path.stem,"version":"1.0.0","engine":eng,"engine_version":"pysigma" if eng=="Sigma" else "yara-x","compatibility_profile":"bounded-field-predicate" if eng=="Sigma" else "yara-x-native","digest":hashlib.sha256(path.read_bytes()).hexdigest(),"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"rules":[path.stem],"source":path.read_text()} for name,eng,path in [("triage-v1","Sigma",ROOT/"rules/sigma/encoded_script.yml"),("demo-v1","YARA-X",ROOT/"rules/yara/demo.yar")]]
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","version":"0.1.0"}
+
+@app.get("/api/v1/admin/openapi.json",include_in_schema=False)
+def protected_openapi(user=Depends(current_user)):
+    administrator(user)
+    return app.openapi()
+
+@app.get("/api/v1/admin/docs",response_class=HTMLResponse,include_in_schema=False)
+def protected_docs(user=Depends(current_user)):
+    administrator(user)
+    response=get_swagger_ui_html(openapi_url="/api/v1/admin/openapi.json",title="JOCKY API reference")
+    response.headers["Content-Security-Policy"]="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'"
+    return response
 
 if (ROOT/"frontend/dist").exists():
     app.mount("/",StaticFiles(directory=ROOT/"frontend/dist",html=True),name="frontend")

@@ -47,8 +47,25 @@ def test_sigma_unsupported():
 
 def test_defensive_indicator_mapping():
     hits, coverage = sigma([{"evidence_id":"e1","event_kind":"vulnerable_driver","payload":{},"provenance_kind":"synthetic"}], "op1")
-    assert coverage["state"] == "matched"
+    assert coverage["state"] == "insufficient_telemetry"
+    assert hits[0]["engine"] == "JOCKY telemetry"
+    assert hits[0]["rule_pack_id"] == "built-in-indicators"
     assert hits[0]["rule_id"] == "jocky-defensive-vulnerable_driver"
+
+@pytest.mark.parametrize("field,value",[("mode","live"),("run_id","different"),("investigation_id","different"),("verification",{"integrity":"invalid"})])
+def test_checkpoint_identity_and_derived_verification(bundle,field,value):
+    changed=copy.deepcopy(bundle)
+    changed[field]=value
+    if field=="verification":
+        assert integrity.verify(changed)["integrity"]=="valid"
+    else:
+        assert integrity.verify(changed)["integrity"]=="invalid"
+
+def test_multi_endpoint_analysis_is_merged():
+    result=run((ROOT/"examples/multi-endpoint.jky").read_text(),"multi-run","multi-case")
+    assert len(result["streams"])==2
+    assert {e["endpoint_id"] for e in result["analysis"]["timeline"]}=={"WIN-LAB-01","UBU-LAB-01"}
+    assert result["verification"]["integrity"]=="valid"
 
 @pytest.mark.parametrize("condition,expected",[("a and not b",[True,False]),("1 of them",[True,True]),("all of them",[False,True]),("(a or b) and a",[True,True])])
 def test_sigma_boolean(condition,expected):
