@@ -2,6 +2,8 @@ from contextlib import contextmanager
 import json
 import uuid
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app import auth, integrity, main
@@ -31,6 +33,74 @@ def test_request_body_limit_without_content_length():
         assert exact_limit.status_code == 422
         assert client.post("/api/v1/auth/login", content=b"{}", headers={"Content-Length": "invalid"}).status_code == 413
         assert client.post("/api/v1/auth/login", content=b"{}", headers={"Content-Length": "9" * 5000}).status_code == 413
+
+
+def test_failed_login_state_is_bounded_and_expired(monkeypatch):
+    monkeypatch.setattr(main, "LOGIN_FAILURES", {})
+    monkeypatch.setattr(main, "MAX_LOGIN_FAILURE_KEYS", 2)
+    with TestClient(main.app) as client:
+        for username in ("missing-one", "missing-two"):
+            assert client.post("/api/v1/auth/login", json={"username": username, "password": "wrong"}).status_code == 401
+        assert len(main.LOGIN_FAILURES) == 2
+        assert client.post("/api/v1/auth/login", json={"username": "missing-three", "password": "wrong"}).status_code == 429
+        assert len(main.LOGIN_FAILURES) == 2
+        for key in main.LOGIN_FAILURES:
+            main.LOGIN_FAILURES[key] = [0]
+        assert client.post("/api/v1/auth/login", json={"username": "missing-three", "password": "wrong"}).status_code == 401
+        assert len(main.LOGIN_FAILURES) == 1
+
+
+def test_login_attempts_are_reserved_before_password_verification(monkeypatch):
+    monkeypatch.setattr(main, "LOGIN_FAILURES", {})
+    key = ("test-client", "investigator")
+    for _ in range(10):
+        main.reserve_login_attempt(key, 100)
+    with pytest.raises(HTTPException) as exc:
+        main.reserve_login_attempt(key, 100)
+    assert exc.value.status_code == 429
+    assert len(main.LOGIN_FAILURES[key]) == 10
+
+
+def test_report_read_uses_its_verified_job_bundle_not_cached_content():
+    with TestClient(main.app) as client:
+        username = f"reports-{uuid.uuid4()}"
+        auth.create_user(username, "Test-only-password-123")
+        login = client.post("/api/v1/auth/login", json={"username": username, "password": "Test-only-password-123"})
+        assert login.status_code == 200
+        client.headers["X-CSRF-Token"] = login.json()["csrf"]
+        case = client.post("/api/v1/investigations", json={"name": "Report integrity", "source": ""}).json()
+        run_id, report_id = str(uuid.uuid4()), str(uuid.uuid4())
+        bundle = {"run_id": run_id, "investigation_id": case["id"], "mode": "lab", "source": "",
+                  "plan": {}, "plan_digest": "test-plan", "streams": [], "blobs": {}, "detections": [],
+                  "coverage": [], "operations": [], "exports": {},
+                  "analysis": {"timeline": [], "edges": [], "risk": {"score": 0, "label": "LAB RISK SCORE", "contributions": []}}}
+        bundle["checkpoint"] = integrity.checkpoint([], bundle["plan_digest"], integrity.analysis_digest(bundle))
+        with connection() as db:
+            db.execute("INSERT INTO jobs(id,investigation_id,status,created_at,completed_at,bundle) VALUES(?,?,?,?,?,?)",
+                       (run_id, case["id"], "completed", now(), now(), json.dumps(bundle)))
+            db.execute("INSERT INTO reports VALUES(?,?,?,?,?)", (report_id, run_id, "json", "forged cached report", now()))
+        url = f"/api/v1/reports/{report_id}"
+        response = client.get(url)
+        assert response.status_code == 200
+        assert response.json()["run_id"] == run_id
+        assert "forged cached report" not in response.text
+        assert response.headers["cache-control"] == "no-store"
+        bundle["analysis"]["risk"]["score"] = 99
+        with connection() as db:
+            db.execute("UPDATE jobs SET bundle=? WHERE id=?", (json.dumps(bundle), run_id))
+        assert client.get(url).status_code == 409
+        verification = client.post(f"/api/v1/investigations/{case['id']}/verify")
+        assert verification.status_code == 200
+        assert verification.json()["integrity"] == "invalid"
+        bundle["run_id"] = str(uuid.uuid4())
+        bundle["checkpoint"] = integrity.checkpoint([], bundle["plan_digest"], integrity.analysis_digest(bundle))
+        assert integrity.verify(bundle)["integrity"] == "valid"
+        with connection() as db:
+            db.execute("UPDATE jobs SET bundle=? WHERE id=?", (json.dumps(bundle), run_id))
+        assert client.get(url).status_code == 409
+        verification = client.post(f"/api/v1/investigations/{case['id']}/verify")
+        assert verification.status_code == 200
+        assert verification.json()["integrity"] == "invalid"
 
 
 def test_analysis_endpoints_use_verified_bundle(monkeypatch):

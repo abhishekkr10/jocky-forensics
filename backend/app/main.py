@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -76,25 +77,43 @@ class Report(BaseModel):
     format: str = "html"
 
 LOGIN_FAILURES = {}
+LOGIN_FAILURES_LOCK = threading.Lock()
+MAX_LOGIN_FAILURE_KEYS = 4096
+LOGIN_FAILURE_WINDOW = 60
+
+def reserve_login_attempt(key, now):
+    with LOGIN_FAILURES_LOCK:
+        if key not in LOGIN_FAILURES and len(LOGIN_FAILURES) >= MAX_LOGIN_FAILURE_KEYS:
+            for old_key, attempts in list(LOGIN_FAILURES.items()):
+                if not any(t > now - LOGIN_FAILURE_WINDOW for t in attempts):
+                    del LOGIN_FAILURES[old_key]
+            if len(LOGIN_FAILURES) >= MAX_LOGIN_FAILURE_KEYS:
+                raise HTTPException(429, "Retry after one minute")
+        failures = [t for t in LOGIN_FAILURES.get(key, []) if t > now - LOGIN_FAILURE_WINDOW]
+        if len(failures) >= 10:
+            raise HTTPException(429, "Retry after one minute")
+        LOGIN_FAILURES[key] = failures + [now]
+
+
 @app.post("/api/v1/auth/login")
 def login(body: Login, request: Request, response: Response):
     origin=request.headers.get("origin")
     if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
         raise HTTPException(403,"Cross-origin login denied")
     key=(request.client.host if request.client else "local", body.username)
-    failures=[t for t in LOGIN_FAILURES.get(key,[]) if t>time.time()-60]
-    if len(failures)>=10: raise HTTPException(429,"Retry after one minute")
+    reserve_login_attempt(key, time.time())
     with connection() as db:
         user=db.execute("SELECT * FROM users WHERE username=?",(body.username,)).fetchone()
         try:
             if not user: raise ValueError()
             HASHER.verify(user["password_hash"],body.password)
         except Exception:
-            LOGIN_FAILURES[key]=failures+[time.time()]
             raise HTTPException(401,"Invalid credentials")
         clear_first_login_credential(user["username"])
         token, csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(24)
         db.execute("INSERT INTO sessions VALUES(?,?,?,?)",(token_hash(token),user["id"],csrf,time.time()+8*3600))
+    with LOGIN_FAILURES_LOCK:
+        LOGIN_FAILURES.pop(key, None)
     response.set_cookie("jocky_session",token,httponly=True,samesite="strict",secure=os.environ.get("JOCKY_HTTPS")=="1",max_age=8*3600)
     audit(user["id"],"login")
     return {"username":user["username"],"role":user["role"],"csrf":csrf}
@@ -117,10 +136,15 @@ def investigation(id,user):
 
 def latest_bundle(id,user,require_valid=True):
     investigation(id,user)
-    with connection() as db: row=db.execute("SELECT bundle FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
+    with connection() as db: row=db.execute("SELECT id,bundle FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
     if not row: raise HTTPException(409,"No completed run")
-    bundle=json.loads(row["bundle"])
+    return verified_bundle(row["bundle"], require_valid, row["id"], id)
+
+def verified_bundle(serialized, require_valid=True, job_id=None, investigation_id=None):
+    bundle=json.loads(serialized)
     result=integrity.verify(bundle)
+    if job_id is not None and (bundle.get("run_id") != job_id or bundle.get("investigation_id") != investigation_id):
+        result={"integrity":"invalid","completeness":"unknown","error":"Stored evidence does not match its job"}
     bundle["verification"]=result
     if require_valid and result["integrity"]!="valid": raise HTTPException(409,"Stored evidence failed integrity verification")
     return bundle
@@ -279,7 +303,7 @@ def processes(id:str,user=Depends(current_user)): return [r for r in engine.reco
 def network(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="network_connections"]
 @app.post("/api/v1/investigations/{id}/verify")
 def verify(id:str,user=Depends(current_user)):
-    result=integrity.verify(latest_bundle(id,user,require_valid=False));audit(user["id"],"integrity.verified",id);return result
+    result=latest_bundle(id,user,require_valid=False)["verification"];audit(user["id"],"integrity.verified",id);return result
 @app.post("/api/v1/investigations/{id}/tamper-test")
 def tamper(id:str,user=Depends(current_user)):
     writer(user);b=copy.deepcopy(latest_bundle(id,user))
@@ -306,10 +330,14 @@ def list_reports(id:str,user=Depends(current_user)):
 
 @app.get("/api/v1/reports/{id}")
 def get_report(id:str,user=Depends(current_user)):
-    with connection() as db: row=db.execute("SELECT r.*,j.investigation_id FROM reports r JOIN jobs j ON j.id=r.job_id WHERE r.id=?",(id,)).fetchone()
+    with connection() as db: row=db.execute("SELECT r.format,j.id AS job_id,j.investigation_id,j.status,j.bundle FROM reports r JOIN jobs j ON j.id=r.job_id WHERE r.id=?",(id,)).fetchone()
     if not row: raise HTTPException(404,"Report not found")
     investigation(row["investigation_id"],user)
-    return Response(row["content"],media_type="text/html" if row["format"]=="html" else "application/json",headers={"Content-Disposition":f"inline; filename=jocky-{id}.{row['format']}","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox"})
+    if row["status"] != "completed" or not row["bundle"]: raise HTTPException(409,"Report source is unavailable")
+    if row["format"] not in {"html", "json"}: raise HTTPException(409,"Report format is invalid")
+    bundle=verified_bundle(row["bundle"], job_id=row["job_id"], investigation_id=row["investigation_id"])
+    content=engine.report_html(bundle) if row["format"]=="html" else json.dumps(bundle,indent=2)
+    return Response(content,media_type="text/html" if row["format"]=="html" else "application/json",headers={"Content-Disposition":f"inline; filename=jocky-{id}.{row['format']}","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox","Cache-Control":"no-store"})
 
 @app.get("/api/v1/audit")
 def audits(user=Depends(current_user)):
