@@ -3,7 +3,7 @@
 ## Demonstration flow
 
 1. Start the local API and frontend using the commands in `README.md`.
-2. Sign in with the local demo credential shown in the login screen.
+2. On first startup, read the generated local credential from `data/first-login.txt`, then sign in. The file is removed after the first successful login.
 3. Open **JOCKY Editor** and load **Deterministic lab**.
 4. Run the investigation and open **Workspace** after completion.
 5. Show the pipeline, evidence graph, telemetry coverage, Sigma/YARA findings and risk explanation.

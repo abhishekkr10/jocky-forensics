@@ -60,7 +60,7 @@ Run `npm --prefix frontend run dev` in another terminal for frontend development
 
 ## Sign in
 
-On a fresh database, startup creates an `investigator` account with the administrator role and a randomly generated password. Credentials are written to `data/first-login.txt` and that file is removed after the first successful login. Save the credential before signing in. Existing databases retain their accounts and passwords.
+On a fresh database, startup creates an `investigator` account with the administrator role and a randomly generated password. Credentials are written to `data/first-login.txt` and that file is removed after the first successful login. Save the credential before signing in. The file is created exclusively with owner-only permissions on Unix; on Windows, startup uses `whoami` and `icacls` to restrict it to the running account, SYSTEM and Administrators before writing the password. Keep the data directory private on shared machines. Existing databases retain their accounts and passwords.
 
 The login page does not publish a password. New users created through the administration helper must have passwords of at least 12 characters. Sessions use an HTTP-only cookie and mutating requests require the session's CSRF token. Administrator API documentation is available at `/api/v1/admin/docs` after sign-in; unauthenticated `/docs` and `/openapi.json` are disabled.
 

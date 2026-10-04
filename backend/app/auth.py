@@ -1,6 +1,10 @@
 import hashlib
+import csv
+import io
 import os
+import re
 import secrets
+import subprocess
 import time
 import uuid
 from argon2 import PasswordHasher
@@ -16,15 +20,36 @@ def create_user(username, password, role="administrator"):
     with connection() as db:
         db.execute("INSERT INTO users VALUES(?,?,?,?)", (str(uuid.uuid4()),username,HASHER.hash(password),role))
 
+def _restrict_first_login(path):
+    if os.name != "nt":
+        return
+    identity = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True, check=True)
+    sid = next(csv.reader(io.StringIO(identity.stdout)))[1]
+    if not re.fullmatch(r"S-\d+(?:-\d+)+", sid):
+        raise ValueError("Could not determine the local account SID")
+    subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r",
+                    f"*{sid}:(F)", "*S-1-5-18:(F)", "*S-1-5-32-544:(F)"],
+                   capture_output=True, text=True, check=True)
+
 def bootstrap():
-    with connection() as db:
-        exists = db.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-    if not exists:
-        password = secrets.token_urlsafe(24)
-        create_user("investigator", password)
-        path = DATA / "first-login.txt"
-        path.write_text(f"Username: investigator\nPassword: {password}\nDelete this file after saving the credential.\n")
-        path.chmod(0o600)
+    path = DATA / "first-login.txt"
+    created = False
+    try:
+        with connection() as db:
+            if db.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+                return
+            password = secrets.token_urlsafe(24)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags, 0o600)
+            created = True
+            with os.fdopen(fd, "w", encoding="utf-8") as credential:
+                _restrict_first_login(path)
+                credential.write(f"Username: investigator\nPassword: {password}\nDelete this file after saving the credential.\n")
+            db.execute("INSERT INTO users VALUES(?,?,?,?)", (str(uuid.uuid4()), "investigator", HASHER.hash(password), "administrator"))
+    except Exception:
+        if created:
+            path.unlink(missing_ok=True)
+        raise
 
 def clear_first_login_credential(username):
     if username == "investigator":

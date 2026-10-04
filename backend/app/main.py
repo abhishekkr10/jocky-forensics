@@ -25,16 +25,44 @@ async def lifespan(app):
 
 app = FastAPI(title="JOCKY forensic investigation API",version="0.1.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 
+class BodyLimitMiddleware:
+    def __init__(self, app, limit=2*1024*1024):
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = next((value for name, value in scope["headers"] if name.lower() == b"content-length"), None)
+        if declared is not None and (not declared.isdigit() or len(declared) > len(str(self.limit)) or int(declared) > self.limit):
+            return await Response("Request too large", status_code=413)(scope, receive, send)
+        messages = []
+        size = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return
+            size += len(message.get("body", b""))
+            if size > self.limit:
+                return await Response("Request too large", status_code=413)(scope, receive, send)
+            messages.append(message)
+            if not message.get("more_body", False):
+                break
+        pending = iter(messages)
+        async def replay():
+            return next(pending, None) or await receive()
+        return await self.app(scope, replay, send)
+
 @app.middleware("http")
 async def boundaries(request: Request, call_next):
-    if int(request.headers.get("content-length","0")) > 2*1024*1024:
-        return Response("Request too large",status_code=413)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
     return response
+
+app.add_middleware(BodyLimitMiddleware)
 
 class Login(BaseModel):
     username: str = Field(max_length=100)
@@ -96,12 +124,6 @@ def latest_bundle(id,user,require_valid=True):
     bundle["verification"]=result
     if require_valid and result["integrity"]!="valid": raise HTTPException(409,"Stored evidence failed integrity verification")
     return bundle
-
-def latest_job(id,user):
-    investigation(id,user)
-    with connection() as db: row=db.execute("SELECT id FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
-    if not row: raise HTTPException(409,"No completed run")
-    return dict(row)
 
 @app.get("/api/v1/examples")
 def examples(user=Depends(current_user)):
@@ -227,21 +249,29 @@ def evidence(id:str,offset:int=0,limit:int=200,user=Depends(current_user)):
 def detections(id:str,user=Depends(current_user)): return latest_bundle(id,user)["detections"]
 @app.get("/api/v1/investigations/{id}/timeline")
 def timeline(id:str,user=Depends(current_user)):
-    job=latest_job(id,user)
-    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM timeline_events WHERE analysis_run_id=? ORDER BY COALESCE(event_time,observed_at),timeline_event_id",(job["id"],))]
-    for r in rows:
-        r["evidence_ids"]=json.loads(r["evidence_ids"]);r["detection_ids"]=json.loads(r["detection_ids"])
-        r["time_kind"]=r["timestamp_meaning"];r["provenance_kind"]=r["provenance"]
-    return rows
+    bundle=latest_bundle(id,user)
+    return [dict(event,
+        timeline_event_id=f"{bundle['run_id']}:timeline:{i}", investigation_id=bundle["investigation_id"],
+        analysis_run_id=bundle["run_id"], collected_at=event.get("observed_at"),
+        timestamp_meaning=event.get("time_kind", "observation"), event_type=event.get("event_type", "observation"),
+        provenance=event.get("provenance_kind", "unknown"))
+        for i,event in enumerate(bundle["analysis"]["timeline"])]
 @app.get("/api/v1/investigations/{id}/correlations")
 def correlations(id:str,user=Depends(current_user)):
-    job=latest_job(id,user)
-    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM correlations WHERE analysis_run_id=? ORDER BY created_at,correlation_id",(job["id"],))]
-    for r in rows:
-        r["source_evidence_ids"]=json.loads(r["source_evidence_ids"]);r["target_evidence_ids"]=json.loads(r["target_evidence_ids"]);r["provenance"]=json.loads(r["provenance"])
-        r["source"]=r["source_evidence_ids"][0] if r["source_evidence_ids"] else "";r["target"]=r["target_evidence_ids"][0] if r["target_evidence_ids"] else ""
-        r["evidence_ids"]=list(dict.fromkeys(r["source_evidence_ids"]+r["target_evidence_ids"]))
-        r["profile"]=r["profile_version"]
+    bundle=latest_bundle(id,user)
+    endpoints = {entry["record"]["evidence_id"]: entry["record"]["endpoint_id"]
+                 for stream in bundle["streams"] for entry in stream["entries"]}
+    rows = []
+    for i, edge in enumerate(bundle["analysis"]["edges"]):
+        source_ids=edge.get("evidence_ids", [edge.get("source")])[:1]
+        target_ids=edge.get("evidence_ids", [edge.get("target")])[1:2] or [edge.get("target")]
+        rows.append(dict(edge,
+            correlation_id=f"{bundle['run_id']}:corr:{i}", investigation_id=bundle["investigation_id"],
+            analysis_run_id=bundle["run_id"], endpoint_id=next((endpoints[x] for x in source_ids if x in endpoints), "coordinator"),
+            source_evidence_ids=source_ids, target_evidence_ids=target_ids,
+            source_entity="evidence", target_entity="evidence", relationship_type="related",
+            profile_version=edge.get("profile", "triage-v1"),
+            provenance={"kind":"derived", "provenance":"backend-analysis"}))
     return rows
 @app.get("/api/v1/investigations/{id}/processes")
 def processes(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="processes"]
