@@ -8,7 +8,7 @@ test('compile, investigate, trace, verify, tamper-copy and report',async({page})
  const password=fs.readFileSync(credentialPath,'utf8').match(/^Password: (.+)$/m)![1];
  await page.goto('/');
  await expect(page.getByRole('heading',{name:'Forensic analysis. Evidence you can trace.'})).toBeVisible();
- await page.getByRole('link',{name:'Open console',exact:true}).click();
+ await page.getByRole('link',{name:'Check console',exact:true}).click();
  await page.getByLabel('Username',{exact:true}).fill('investigator');
  await page.getByLabel('Password',{exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();

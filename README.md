@@ -6,7 +6,7 @@ The current implementation supports defensive, read-oriented investigations. Lab
 
 ## Website and investigation console
 
-The [public website](https://jocky-six.vercel.app) contains product documentation and a labelled snapshot of a synthetic lab investigation. Its **Open console** link checks backend connectivity before requesting credentials. A hosted investigation backend is not yet connected to the public deployment.
+The [public website](https://jocky-six.vercel.app) contains product documentation and a labelled snapshot of a synthetic lab investigation. Its **Check console** link checks backend connectivity before requesting credentials. A hosted investigation backend is not yet connected to the public deployment.
 
 The complete working console runs locally. Open `http://127.0.0.1:5173/#/app` during development, or `http://127.0.0.1:8000/#/app` after building the frontend. Hash navigation supports the existing backend static-file mount; `/app` is also recognized by frontend servers that provide SPA fallback routing.
 
@@ -60,7 +60,7 @@ Run `npm --prefix frontend run dev` in another terminal for frontend development
 
 ## Sign in
 
-On a fresh database, startup creates an `investigator` account with the administrator role and a randomly generated password. Credentials are written to `data/first-login.txt` and that file is removed after the first successful login. Save the credential before signing in. Existing databases retain their accounts and passwords.
+On a fresh database, startup creates an `investigator` account with the administrator role and a randomly generated password. Credentials are written to `data/first-login.txt` and that file is removed after the first successful login. Save the credential before signing in. The file is created exclusively with owner-only permissions on Unix; on Windows, startup uses `whoami` and `icacls` to restrict it to the running account, SYSTEM and Administrators before writing the password. Keep the data directory private on shared machines. Existing databases retain their accounts and passwords.
 
 The login page does not publish a password. New users created through the administration helper must have passwords of at least 12 characters. Sessions use an HTTP-only cookie and mutating requests require the session's CSRF token. Administrator API documentation is available at `/api/v1/admin/docs` after sign-in; unauthenticated `/docs` and `/openapi.json` are disabled.
 

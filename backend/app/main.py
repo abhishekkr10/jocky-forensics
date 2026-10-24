@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -31,16 +32,44 @@ app.include_router(agent_router)
 from .rulepacks import router as rulepack_router
 app.include_router(rulepack_router)
 
+class BodyLimitMiddleware:
+    def __init__(self, app, limit=2*1024*1024):
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = next((value for name, value in scope["headers"] if name.lower() == b"content-length"), None)
+        if declared is not None and (not declared.isdigit() or len(declared) > len(str(self.limit)) or int(declared) > self.limit):
+            return await Response("Request too large", status_code=413)(scope, receive, send)
+        messages = []
+        size = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return
+            size += len(message.get("body", b""))
+            if size > self.limit:
+                return await Response("Request too large", status_code=413)(scope, receive, send)
+            messages.append(message)
+            if not message.get("more_body", False):
+                break
+        pending = iter(messages)
+        async def replay():
+            return next(pending, None) or await receive()
+        return await self.app(scope, replay, send)
+
 @app.middleware("http")
 async def boundaries(request: Request, call_next):
-    if int(request.headers.get("content-length","0")) > 2*1024*1024:
-        return Response("Request too large",status_code=413)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
     return response
+
+app.add_middleware(BodyLimitMiddleware)
 
 class Login(BaseModel):
     username: str = Field(max_length=100)
@@ -54,25 +83,43 @@ class Report(BaseModel):
     format: str = "html"
 
 LOGIN_FAILURES = {}
+LOGIN_FAILURES_LOCK = threading.Lock()
+MAX_LOGIN_FAILURE_KEYS = 4096
+LOGIN_FAILURE_WINDOW = 60
+
+def reserve_login_attempt(key, now):
+    with LOGIN_FAILURES_LOCK:
+        if key not in LOGIN_FAILURES and len(LOGIN_FAILURES) >= MAX_LOGIN_FAILURE_KEYS:
+            for old_key, attempts in list(LOGIN_FAILURES.items()):
+                if not any(t > now - LOGIN_FAILURE_WINDOW for t in attempts):
+                    del LOGIN_FAILURES[old_key]
+            if len(LOGIN_FAILURES) >= MAX_LOGIN_FAILURE_KEYS:
+                raise HTTPException(429, "Retry after one minute")
+        failures = [t for t in LOGIN_FAILURES.get(key, []) if t > now - LOGIN_FAILURE_WINDOW]
+        if len(failures) >= 10:
+            raise HTTPException(429, "Retry after one minute")
+        LOGIN_FAILURES[key] = failures + [now]
+
+
 @app.post("/api/v1/auth/login")
 def login(body: Login, request: Request, response: Response):
     origin=request.headers.get("origin")
     if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
         raise HTTPException(403,"Cross-origin login denied")
     key=(request.client.host if request.client else "local", body.username)
-    failures=[t for t in LOGIN_FAILURES.get(key,[]) if t>time.time()-60]
-    if len(failures)>=10: raise HTTPException(429,"Retry after one minute")
+    reserve_login_attempt(key, time.time())
     with connection() as db:
         user=db.execute("SELECT * FROM users WHERE username=?",(body.username,)).fetchone()
         try:
             if not user: raise ValueError()
             HASHER.verify(user["password_hash"],body.password)
         except Exception:
-            LOGIN_FAILURES[key]=failures+[time.time()]
             raise HTTPException(401,"Invalid credentials")
         clear_first_login_credential(user["username"])
         token, csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(24)
         db.execute("INSERT INTO sessions VALUES(?,?,?,?)",(token_hash(token),user["id"],csrf,time.time()+8*3600))
+    with LOGIN_FAILURES_LOCK:
+        LOGIN_FAILURES.pop(key, None)
     response.set_cookie("jocky_session",token,httponly=True,samesite="strict",secure=os.environ.get("JOCKY_HTTPS")=="1",max_age=8*3600)
     audit(user["id"],"login")
     return {"username":user["username"],"role":user["role"],"csrf":csrf}
@@ -95,19 +142,18 @@ def investigation(id,user):
 
 def latest_bundle(id,user,require_valid=True):
     investigation(id,user)
-    with connection() as db: row=db.execute("SELECT bundle FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
+    with connection() as db: row=db.execute("SELECT id,bundle FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
     if not row: raise HTTPException(409,"No completed run")
-    bundle=json.loads(row["bundle"])
+    return verified_bundle(row["bundle"], require_valid, row["id"], id)
+
+def verified_bundle(serialized, require_valid=True, job_id=None, investigation_id=None):
+    bundle=json.loads(serialized)
     result=integrity.verify(bundle)
+    if job_id is not None and (bundle.get("run_id") != job_id or bundle.get("investigation_id") != investigation_id):
+        result={"integrity":"invalid","completeness":"unknown","error":"Stored evidence does not match its job"}
     bundle["verification"]=result
     if require_valid and result["integrity"]!="valid": raise HTTPException(409,"Stored evidence failed integrity verification")
     return bundle
-
-def latest_job(id,user):
-    investigation(id,user)
-    with connection() as db: row=db.execute("SELECT id FROM jobs WHERE investigation_id=? AND status='completed' ORDER BY created_at DESC LIMIT 1",(id,)).fetchone()
-    if not row: raise HTTPException(409,"No completed run")
-    return dict(row)
 
 @app.get("/api/v1/examples")
 def examples(user=Depends(current_user)):
@@ -234,33 +280,28 @@ def detections(id:str,user=Depends(current_user)): return latest_bundle(id,user)
 @app.get("/api/v1/investigations/{id}/timeline")
 def timeline(id:str,user=Depends(current_user)):
     bundle=latest_bundle(id,user)
-    job=latest_job(id,user)
-    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM timeline_events WHERE analysis_run_id=? ORDER BY COALESCE(event_time,observed_at),timeline_event_id",(job["id"],))]
-    for r in rows:
-        r["evidence_ids"]=json.loads(r["evidence_ids"]);r["detection_ids"]=json.loads(r["detection_ids"])
-        r["time_kind"]=r["timestamp_meaning"];r["provenance_kind"]=r["provenance"]
-    fields=("endpoint_id","event_time","observed_at","time_kind","uncertainty","event_type","evidence_ids","detection_ids","provenance_kind","summary")
-    expected=[{k:e.get(k, {"endpoint_id":"unknown","time_kind":"observation","uncertainty":"unmeasured","event_type":"observation","evidence_ids":[],"detection_ids":[],"provenance_kind":"unknown","summary":""}.get(k)) for k in fields} for e in bundle["analysis"].get("timeline",[])]
-    actual=[{k:r[k] for k in fields} for r in rows]
-    if sorted(map(lambda r:json.dumps(r,sort_keys=True),actual))!=sorted(map(lambda r:json.dumps(r,sort_keys=True),expected)):
-        raise HTTPException(409,"Stored timeline differs from signed analysis")
-    return rows
+    return [dict(event,
+        timeline_event_id=f"{bundle['run_id']}:timeline:{i}", investigation_id=bundle["investigation_id"],
+        analysis_run_id=bundle["run_id"], collected_at=event.get("observed_at"),
+        timestamp_meaning=event.get("time_kind", "observation"), event_type=event.get("event_type", "observation"),
+        provenance=event.get("provenance_kind", "unknown"))
+        for i,event in enumerate(bundle["analysis"]["timeline"])]
 @app.get("/api/v1/investigations/{id}/correlations")
 def correlations(id:str,user=Depends(current_user)):
     bundle=latest_bundle(id,user)
-    job=latest_job(id,user)
-    with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM correlations WHERE analysis_run_id=? ORDER BY created_at,correlation_id",(job["id"],))]
-    for r in rows:
-        r["source_evidence_ids"]=json.loads(r["source_evidence_ids"]);r["target_evidence_ids"]=json.loads(r["target_evidence_ids"]);r["provenance"]=json.loads(r["provenance"])
-        r["source"]=r["source_evidence_ids"][0] if r["source_evidence_ids"] else "";r["target"]=r["target_evidence_ids"][0] if r["target_evidence_ids"] else ""
-        r["evidence_ids"]=list(dict.fromkeys(r["source_evidence_ids"]+r["target_evidence_ids"]))
-        r["profile"]=r["profile_version"]
-    expected=[]
-    for edge in bundle["analysis"].get("edges",[]):
-        expected.append({"source_evidence_ids":edge.get("evidence_ids",[edge.get("source")])[:1],"target_evidence_ids":edge.get("evidence_ids",[edge.get("target")])[1:2] or [edge.get("target")],"reason":edge.get("reason",""),"confidence":edge.get("confidence","unknown"),"profile":edge.get("profile","triage-v1")})
-    actual=[{k:r[k] for k in ("source_evidence_ids","target_evidence_ids","reason","confidence","profile")} for r in rows]
-    if sorted(map(lambda r:json.dumps(r,sort_keys=True),actual))!=sorted(map(lambda r:json.dumps(r,sort_keys=True),expected)):
-        raise HTTPException(409,"Stored correlations differ from signed analysis")
+    endpoints = {entry["record"]["evidence_id"]: entry["record"]["endpoint_id"]
+                 for stream in bundle["streams"] for entry in stream["entries"]}
+    rows = []
+    for i, edge in enumerate(bundle["analysis"]["edges"]):
+        source_ids=edge.get("evidence_ids", [edge.get("source")])[:1]
+        target_ids=edge.get("evidence_ids", [edge.get("target")])[1:2] or [edge.get("target")]
+        rows.append(dict(edge,
+            correlation_id=f"{bundle['run_id']}:corr:{i}", investigation_id=bundle["investigation_id"],
+            analysis_run_id=bundle["run_id"], endpoint_id=next((endpoints[x] for x in source_ids if x in endpoints), "coordinator"),
+            source_evidence_ids=source_ids, target_evidence_ids=target_ids,
+            source_entity="evidence", target_entity="evidence", relationship_type="related",
+            profile_version=edge.get("profile", "triage-v1"),
+            provenance={"kind":"derived", "provenance":"backend-analysis"}))
     return rows
 @app.get("/api/v1/investigations/{id}/processes")
 def processes(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="processes"]
@@ -268,7 +309,7 @@ def processes(id:str,user=Depends(current_user)): return [r for r in engine.reco
 def network(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="network_connections"]
 @app.post("/api/v1/investigations/{id}/verify")
 def verify(id:str,user=Depends(current_user)):
-    result=integrity.verify(latest_bundle(id,user,require_valid=False));audit(user["id"],"integrity.verified",id);return result
+    result=latest_bundle(id,user,require_valid=False)["verification"];audit(user["id"],"integrity.verified",id);return result
 @app.post("/api/v1/investigations/{id}/tamper-test")
 def tamper(id:str,user=Depends(current_user)):
     writer(user);b=copy.deepcopy(latest_bundle(id,user))
@@ -295,10 +336,14 @@ def list_reports(id:str,user=Depends(current_user)):
 
 @app.get("/api/v1/reports/{id}")
 def get_report(id:str,user=Depends(current_user)):
-    with connection() as db: row=db.execute("SELECT r.*,j.investigation_id FROM reports r JOIN jobs j ON j.id=r.job_id WHERE r.id=?",(id,)).fetchone()
+    with connection() as db: row=db.execute("SELECT r.format,j.id AS job_id,j.investigation_id,j.status,j.bundle FROM reports r JOIN jobs j ON j.id=r.job_id WHERE r.id=?",(id,)).fetchone()
     if not row: raise HTTPException(404,"Report not found")
     investigation(row["investigation_id"],user)
-    return Response(row["content"],media_type="text/html" if row["format"]=="html" else "application/json",headers={"Content-Disposition":f"inline; filename=jocky-{id}.{row['format']}","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox"})
+    if row["status"] != "completed" or not row["bundle"]: raise HTTPException(409,"Report source is unavailable")
+    if row["format"] not in {"html", "json"}: raise HTTPException(409,"Report format is invalid")
+    bundle=verified_bundle(row["bundle"], job_id=row["job_id"], investigation_id=row["investigation_id"])
+    content=engine.report_html(bundle) if row["format"]=="html" else json.dumps(bundle,indent=2)
+    return Response(content,media_type="text/html" if row["format"]=="html" else "application/json",headers={"Content-Disposition":f"inline; filename=jocky-{id}.{row['format']}","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox","Cache-Control":"no-store"})
 
 @app.get("/api/v1/audit")
 def audits(user=Depends(current_user)):

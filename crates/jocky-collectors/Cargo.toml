@@ -12,3 +12,4 @@ jocky-ir = { path = "../jocky-ir" }
 sysinfo = "0.33"
 netstat2 = "0.11"
 quick-xml = "0.37"
+cap-std = "4.0.3"

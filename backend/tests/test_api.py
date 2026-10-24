@@ -36,12 +36,14 @@ def test_complete_api_journey():
         with connection() as db:
             event=db.execute("SELECT timeline_event_id,summary FROM timeline_events WHERE analysis_run_id=? LIMIT 1",(job.json()["id"],)).fetchone()
             db.execute("UPDATE timeline_events SET summary='tampered' WHERE timeline_event_id=?",(event["timeline_event_id"],))
-        assert c.get(base+"/timeline").status_code==409
+        assert c.get(base+"/timeline").status_code==200
+        assert "tampered" not in c.get(base+"/timeline").text
         with connection() as db:
             db.execute("UPDATE timeline_events SET summary=? WHERE timeline_event_id=?",(event["summary"],event["timeline_event_id"]))
             edge=db.execute("SELECT correlation_id,reason FROM correlations WHERE analysis_run_id=? LIMIT 1",(job.json()["id"],)).fetchone()
             db.execute("UPDATE correlations SET reason='tampered' WHERE correlation_id=?",(edge["correlation_id"],))
-        assert c.get(base+"/correlations").status_code==409
+        assert c.get(base+"/correlations").status_code==200
+        assert "tampered" not in c.get(base+"/correlations").text
         with connection() as db:
             db.execute("UPDATE correlations SET reason=? WHERE correlation_id=?",(edge["reason"],edge["correlation_id"]))
         assert c.get(base+"/timeline").status_code==200
