@@ -5,8 +5,32 @@ on:
   pull_request:
 
 jobs:
-  verify:
+  container:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t jocky:verify .
+      - name: Verify container health and native worker
+        run: |
+          docker run -d --name jocky-verify -p 127.0.0.1:8000:8000 jocky:verify
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8000/api/v1/health; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8000/api/v1/health
+          docker exec jocky-verify jocky --help
+          docker exec jocky-verify python -c "from backend.app import engine, integrity; bundle = engine.run('mode lab\ncollect processes as p\nverify evidence', 'container-smoke', 'container-case'); assert engine.records(bundle); assert integrity.verify(bundle)['integrity'] == 'valid'; print('Native lab collection and evidence verification passed')"
+      - name: Remove verification container
+        if: always()
+        run: docker rm -f jocky-verify || true
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,9 +50,20 @@ jobs:
         run: |
           cargo build --workspace
           cargo test --workspace
+          cargo build --locked --workspace --release
       - name: Backend tests
         run: python -m pytest -q
       - name: Frontend build and unit tests
         run: |
           npm run build --prefix frontend
           npm run test --prefix frontend
+      - name: Upload native release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: jocky-native-${{ matrix.os }}
+          path: |
+            target/release/jocky
+            target/release/jocky.exe
+            target/release/jocky-agent
+            target/release/jocky-agent.exe
+          if-no-files-found: error

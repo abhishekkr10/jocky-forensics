@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(os.environ.get("JOCKY_DATA", ROOT / "data")).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
-EXE = ROOT / "target" / "debug" / ("jocky.exe" if os.name == "nt" else "jocky")
+EXE = Path(os.environ.get("JOCKY_WORKER", ROOT / "target" / "debug" / ("jocky.exe" if os.name == "nt" else "jocky"))).resolve()
 
 def native(command, payload):
     if command not in {"compile", "check", "operation", "seal", "verify", "analyze", "predicate"}:

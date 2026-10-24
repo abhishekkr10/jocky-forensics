@@ -1,3 +1,5 @@
+mod predicate;
+mod functions;
 use jocky_ir::*;
 use serde::{Serialize,Deserialize};
 use serde_json::json;
@@ -59,7 +61,7 @@ impl<'a> Cursor<'a>{
 }
 pub fn compile(src:&str)->Result<Plan,Vec<Diagnostic>>{
  if src.len()>65536{return Err(vec![err("E000","Script exceeds 64 KiB",&Span{start:0,end:0,line:1,column:1})])}
- let ast=parse(src).map_err(|e|vec![e])?;
+ let ast=functions::expand(parse(src).map_err(|e|vec![e])?).map_err(|e|vec![e])?;
  lower(src,&ast).map_err(|e|vec![e])
 }
 fn lower(src:&str,ast:&Ast)->Result<Plan,Diagnostic>{
@@ -70,21 +72,21 @@ fn lower(src:&str,ast:&Ast)->Result<Plan,Diagnostic>{
    "mode"=>{if had_mode||!p.nodes.is_empty(){return Err(err("E101","mode must occur once before operations",&s.span))}p.mode=c.text()?;if !["live","lab"].contains(&p.mode.as_str()){return Err(err("E101","mode must be live or lab",&s.span))}had_mode=true;c.done()?;continue},
    "target"=>{if had_target||!p.nodes.is_empty(){return Err(err("E101","target must occur once before operations",&s.span))}p.target_selector=if c.ts.get(c.i).map(|t|t.text.as_str())==Some("["){c.list(true)?}else{vec![c.text()?]};had_target=true;c.done()?;continue},
    "collect"|"simulate"|"import"=>{let name=c.binding()?;params.insert("name".into(),json!(name));
-    if s.keyword=="collect"{typ=match name.as_str(){"system_information"=>"system","processes"=>"process_snapshot","network_connections"=>"network","startup_items"=>"startup","files"=>"files","event_logs"=>"events",_=>return Err(err("E102",format!("Unknown collector '{name}'. Did you mean 'processes'?"),&s.span))}.into();p.required_capabilities.push(name.clone());}
+    if s.keyword=="collect"{typ=match name.as_str(){"system_information"=>"system","processes"=>"process_snapshot","network_connections"=>"network","startup_items"=>"startup","files"=>"files","event_logs"=>"events","registry_startup"=>"startup","services"=>"services",_=>return Err(err("E102",format!("Unknown collector '{name}'. Did you mean 'processes'?"),&s.span))}.into();p.required_capabilities.push(name.clone());}
     else if s.keyword=="simulate"{if p.mode!="lab"{return Err(err("E150","simulate requires mode lab",&s.span))}if !["process_injection","encoded_script","suspicious_dns","unusual_parent_child_process","vulnerable_driver","api_unhooking","suspicious_lotl","persistence_artifact"].contains(&name.as_str()){return Err(err("E151","Unknown lab event template",&s.span))}typ="events".into();}
-    else {if name!="json"{return Err(err("E152","Only JSON import is supported",&s.span))}params.insert("path".into(),json!(c.string()?));typ="events".into();}
+    else {if !["json","pcap"].contains(&name.as_str()){return Err(err("E152","Expected JSON or classic PCAP import",&s.span))}params.insert("path".into(),json!(c.string()?));typ="events".into();}
     while c.ts.get(c.i).map(|t|t.text.as_str())!=Some("as"){let k=c.binding()?;c.word("=")?;let t=c.take()?;let v=if t.quoted{json!(t.text)}else if let Ok(n)=t.text.parse::<u64>(){json!(n)}else{json!(t.text)};if params.insert(k,v).is_some(){return Err(err("E103","Duplicate argument",&s.span))}}
     c.word("as")?;output=Some(c.binding()?);
     for (k,v) in &params {if k=="name"||k=="path"{continue}if !["root","max_files","profile","since","max_records"].contains(&k.as_str()){return Err(err("E103",format!("Unknown argument '{k}'"),&s.span))}if k.starts_with("max_")&&v.as_u64().filter(|n|*n>0&&*n<=10000).is_none(){return Err(err("E104","Limit must be an integer between 1 and 10000",&s.span))}}
    },
-   "hunt"|"scan"=>{c.word(if s.keyword=="hunt"{"sigma"}else{"yara"})?;let pack=c.string()?;if pack!=if s.keyword=="hunt"{"triage-v1"}else{"demo-v1"}{return Err(err("E240","Unknown pinned rule pack",&s.span))}params.insert("pack".into(),json!(pack));p.rule_packs.push(pack);c.word("on")?;inputs.push(c.binding()?);c.word("as")?;output=Some(c.binding()?);typ="detections".into();},
+   "hunt"|"scan"=>{c.word(if s.keyword=="hunt"{"sigma"}else{"yara"})?;let pack=c.string()?;let builtin=if s.keyword=="hunt"{"triage-v1"}else{"demo-v1"};let prefix=if s.keyword=="hunt"{"sigma:"}else{"yara:"};let custom=pack.strip_prefix(prefix).is_some_and(|v|v.len()==64&&v.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)));if pack!=builtin&&!custom{return Err(err("E240","Unknown pinned rule pack",&s.span))}params.insert("pack".into(),json!(pack));p.rule_packs.push(pack);c.word("on")?;inputs.push(c.binding()?);c.word("as")?;output=Some(c.binding()?);typ="detections".into();},
    "correlate"=>{inputs=c.list(false)?;c.word("using")?;let profile=c.string()?;if profile!="triage-v1"{return Err(err("E250","Unknown correlation profile",&s.span))}p.profiles.push(profile.clone());params.insert("profile".into(),json!(profile));c.word("within")?;let d=c.text()?;let secs=duration(&d).ok_or_else(||err("E104","Invalid duration",&s.span))?;params.insert("window_seconds".into(),json!(secs));c.word("as")?;output=Some(c.binding()?);typ="incident".into();},
    "timeline"|"risk"=>{inputs.push(c.binding()?);if s.keyword=="risk"{c.word("using")?;let profile=c.string()?;if profile!="triage-v1"{return Err(err("E250","Unknown risk profile",&s.span))}params.insert("profile".into(),json!(profile));}c.word("as")?;output=Some(c.binding()?);typ=s.keyword.clone();},
    "verify"=>c.word("evidence")?,
    "report"=>{let fmt=c.text()?;if !["html","json"].contains(&fmt.as_str()){return Err(err("E105","Expected html or json",&s.span))}params.insert("format".into(),json!(fmt));params.insert("path".into(),json!(c.string()?));},
    "export"=>{inputs.push(c.binding()?);c.word("json")?;params.insert("path".into(),json!(c.string()?));},
    "compare"=>{inputs.push(c.binding()?);c.word("with")?;inputs.push(c.binding()?);c.word("as")?;output=Some(c.binding()?);typ="comparison".into();},
-   "filter"|"assert"=>{inputs.push(c.binding()?);c.word("where")?;let end=if s.keyword=="filter"{c.ts.iter().rposition(|t|!t.quoted&&t.text=="as").ok_or_else(||err("E002","Expected as binding",&s.span))?}else{c.ts.len()};let expression=&c.ts[c.i..end];if expression.len()!=3||!["==","!=","contains"].contains(&expression[1].text.as_str()){return Err(err("E260","This release supports field ==, != or contains literal",&s.span))}params.insert("predicate".into(),json!({"field":expression[0].text,"op":expression[1].text,"value":expression[2].text}));c.i=end;if s.keyword=="filter"{c.word("as")?;output=Some(c.binding()?);typ="filtered".into();}},
+   "filter"|"assert"=>{inputs.push(c.binding()?);c.word("where")?;let end=if s.keyword=="filter"{c.ts.iter().rposition(|t|!t.quoted&&t.text=="as").ok_or_else(||err("E002","Expected as binding",&s.span))?}else{c.ts.len()};let expression=&c.ts[c.i..end];params.insert("predicate".into(),predicate::parse(expression,&s.span)?);c.i=end;if s.keyword=="filter"{c.word("as")?;output=Some(c.binding()?);typ="filtered".into();}},
    _=>return Err(err("E100",format!("Unknown statement '{}'",s.keyword),&s.span))
   }
   c.done()?;let mut deps=vec![];
@@ -93,12 +95,15 @@ fn lower(src:&str,ast:&Ast)->Result<Plan,Diagnostic>{
   p.source_map.insert(id.clone(),s.span.clone());p.nodes.push(Node{id,opcode:s.keyword.clone(),placement:if ["collect","simulate","scan","hunt","import","filter"].contains(&s.keyword.as_str()){"endpoint"}else{"coordinator"}.into(),inputs,output,output_type:typ,parameters:params,depends_on:deps,error_policy:"fail".into()});
  }
  p.rule_packs.sort();p.rule_packs.dedup();
- for pack in &p.rule_packs {p.rule_digests.insert(pack.clone(),hash(if pack=="triage-v1" {include_bytes!("../../../rules/sigma/encoded_script.yml")}else{include_bytes!("../../../rules/yara/demo.yar")}));}
+ for pack in &p.rule_packs {p.rule_digests.insert(pack.clone(),if let Some((_,value))=pack.split_once(':'){value.to_string()}else{hash(if pack=="triage-v1" {include_bytes!("../../../rules/sigma/encoded_script.yml")}else{include_bytes!("../../../rules/yara/demo.yar")})});}
  p.profiles.sort();p.profiles.dedup();p.required_capabilities.sort();p.required_capabilities.dedup();
  p.validate().map_err(|e|err("E300",e,&Span{start:0,end:0,line:1,column:1}))?;Ok(p)
 }
 pub fn duration(s:&str)->Option<u64>{let (n,u)=s.split_at(s.len().checked_sub(1)?);let v=n.parse::<u64>().ok()?;v.checked_mul(match u{"s"=>1,"m"=>60,"h"=>3600,"d"=>86400,_=>return None})}
 #[cfg(test)] mod tests{use super::*;
+ #[test]fn reusable_functions(){let source="function select(input)\nfilter input where pid > 10 as result\nreturn result\nend\nmode lab\ncollect processes as p\ncall select(p) as first\ncall select(p) as second";let plan=compile(source).unwrap();assert_eq!(plan.nodes.len(),3);assert_eq!(plan.nodes[1].output.as_deref(),Some("first"));assert_eq!(plan.nodes[2].output.as_deref(),Some("second"));assert_eq!(plan.source_map["op002"].line,7);}
+ #[test]fn compound_filters(){let plan=compile("mode lab\ncollect processes as p\nfilter p where pid >= 100 and (name == \"powershell.exe\" or not name contains \"cmd\") as f").unwrap();assert_eq!(plan.nodes[1].parameters["predicate"]["op"],"and");assert_eq!(plan.nodes[1].parameters["predicate"]["args"][0]["value"],100);}
+ #[test]fn malformed_predicates(){for expression in ["pid ==", "(pid == 2", "pid == 2 and", "pid == 2 garbage"]{assert!(compile(&format!("collect processes as p\nfilter p where {expression} as f")).is_err())}}
  #[test]fn spans(){let t=lex("# hi\ncollect files root=\"a b\" as f").unwrap();assert_eq!(t[1].span.line,2);assert!(t.iter().any(|t|t.quoted&&t.text=="a b"));}
  #[test]fn deterministic(){let s="mode lab\ncollect processes as p\n";assert_eq!(digest(&compile(s).unwrap()),digest(&compile(s).unwrap()));}
  #[test]fn undefined(){assert_eq!(compile("hunt sigma \"triage-v1\" on missing as h").unwrap_err()[0].code,"E201");}

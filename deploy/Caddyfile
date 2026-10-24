@@ -1,0 +1,3 @@
+{$JOCKY_DOMAIN} {
+    reverse_proxy console:8000
+}

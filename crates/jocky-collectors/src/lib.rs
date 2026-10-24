@@ -2,7 +2,8 @@ use serde_json::{Value,json};
 use std::{fs,path::Path,time::{Instant,Duration}};
 use sysinfo::{Pid,System};
 mod event_logs;
-pub fn manifests()->Value{json!(["system_information","processes","network_connections","startup_items","files","event_logs"].iter().map(|id|json!({"id":id,"version":"0.1.0","supported_os":["windows","linux"],"argument_schema":{"max_records":"integer 1..10000","root":"approved directory for files"},"output_schema":id,"required_permissions":"current user; permission failures reported","provided_fields":match *id{"processes"=>vec!["pid","ppid","name","executable","start_time"],"network_connections"=>vec!["source","destination","protocol","port"],_=>vec![]},"event_categories":if *id=="processes"{"process_snapshot"}else{*id},"resource_limits":{"records":10000,"bytes":10485760,"seconds":30}})).collect::<Vec<_>>())}
+#[cfg(windows)] mod windows_inventory;
+pub fn manifests()->Value{json!(["system_information","processes","network_connections","startup_items","files","event_logs","registry_startup","services"].iter().map(|id|json!({"id":id,"version":"0.1.0","supported_os":if ["registry_startup","services"].contains(id){vec!["windows"]}else{vec!["windows","linux"]},"argument_schema":{"max_records":"integer 1..10000","root":"approved directory for files"},"output_schema":id,"required_permissions":"current user; permission failures reported","provided_fields":match *id{"processes"=>vec!["pid","ppid","name","executable","start_time"],"network_connections"=>vec!["source","destination","protocol","port"],_=>vec![]},"event_categories":if *id=="processes"{"process_snapshot"}else{*id},"resource_limits":{"records":10000,"bytes":10485760,"seconds":30}})).collect::<Vec<_>>())}
 pub fn collect(name:&str,args:&Value,approved_root:&Path)->Result<Value,String>{
  let max=args["max_records"].as_u64().unwrap_or(1000).min(10000) as usize;let start=Instant::now();let mut rows=vec![];let mut warnings=vec![];
  match name {
@@ -14,6 +15,8 @@ pub fn collect(name:&str,args:&Value,approved_root:&Path)->Result<Value,String>{
  },
  "startup_items"=>{let roots:Vec<std::path::PathBuf>=if cfg!(windows){std::env::var_os("APPDATA").map(|v|vec![std::path::PathBuf::from(v).join("Microsoft/Windows/Start Menu/Programs/Startup")]).unwrap_or_default()}else{vec!["/etc/systemd/system".into(),"/etc/xdg/autostart".into()]};for root in roots{match fs::read_dir(root){Ok(xs)=>for e in xs.take(max).flatten(){rows.push(json!({"path":e.path().to_string_lossy(),"summary":e.file_name().to_string_lossy()}))},Err(e)=>warnings.push(e.to_string())}}warnings.push("Coverage: selected startup directories only; registry and other persistence artifacts not collected".into());},
  "event_logs"=>return event_logs::collect(max,args),
+ "registry_startup"=>{#[cfg(windows)] {return windows_inventory::registry(max)} #[cfg(not(windows))] {return Err("Registry collection requires Windows".into())}},
+ "services"=>{#[cfg(windows)] {return windows_inventory::services(max)} #[cfg(not(windows))] {return Err("Service state collection currently requires Windows".into())}},
  _=>return Err("Unknown collector".into())
  }
  Ok(json!({"rows":rows,"status":if warnings.is_empty(){"success"}else{"partial"},"warnings":warnings}))

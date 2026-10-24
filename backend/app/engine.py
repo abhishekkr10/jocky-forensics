@@ -33,10 +33,12 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
     if not compiled["ok"]:
         raise ValueError(json.dumps(compiled["diagnostics"]))
     plan = compiled["plan"]
-    if plan["mode"] == "live" and plan["target_selector"] != ["host"]:
-        raise ValueError("Remote dispatch is not implemented. Live target must be host.")
     datasets, evidence, detections, coverage, operations, blobs, exports = {}, [], [], [], [], {}, {}
     for pack,digest in plan["rule_digests"].items():
+        if ":" in pack:
+            from .rulepacks import load
+            load(pack)
+            continue
         path=ROOT/("rules/sigma/encoded_script.yml" if pack=="triage-v1" else "rules/yara/demo.yar")
         if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise ValueError("Rule pack changed since compiler build; rebuild the compiler to pin the new pack")
@@ -44,6 +46,7 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
     analyses = []
     streams = []
     for endpoint in plan["target_selector"]:
+        remote=plan["mode"]=="live" and endpoint!="host"
         complete = True
         if endpoint == "host":
             import socket
@@ -66,7 +69,11 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
                     path = (ROOT / "fixtures" / args["path"]).resolve()
                     if not path.is_relative_to((ROOT / "fixtures").resolve()) or path.stat().st_size > 1048576:
                         raise ValueError("Import must be a bounded file within fixtures")
-                    rows = json.loads(path.read_text())
+                    if name=="pcap":
+                        from .pcap import packets
+                        rows=packets(path.read_bytes())
+                    else:
+                        rows = json.loads(path.read_text())
                     if not isinstance(rows, list) or len(rows) > 1000 or any(not isinstance(r, dict) for r in rows):
                         raise ValueError("Import expects at most 1000 JSON objects")
                     provenance = "imported"
@@ -74,11 +81,18 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
                     rows = lab_rows(name)
                 else:
                     root=str(ROOT / "fixtures")
-                    collected = native("operation", {"source": source, "plan": plan, "operation_id": node["id"], "approved_root": root,
-                        "signed_job":integrity.signed_job(compiled["plan_digest"],node["id"],root,run_id)})
+                    if remote:
+                        from .agents import dispatch
+                        collected=dispatch(endpoint,source,compiled,node,run_id,cancelled)
+                    else:
+                        collected = native("operation", {"source": source, "plan": plan, "operation_id": node["id"], "approved_root": root,
+                            "signed_job":integrity.signed_job(compiled["plan_digest"],node["id"],root,run_id)})
                     rows, status, warnings = collected["rows"], collected["status"], collected["warnings"]
                 for i, row in enumerate(rows):
                     row = copy.deepcopy(row)
+                    if provenance=="live" and type(row.get("event_time_unix_us")) is int:
+                        seconds,micros=divmod(row["event_time_unix_us"],1000000)
+                        row["event_time"]=(datetime.fromtimestamp(seconds,tz=timezone.utc)+timedelta(microseconds=micros)).isoformat()
                     content = row.pop("content_hex", None)
                     raw = None
                     if content is not None:
@@ -99,7 +113,7 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
                            "operation_id": node["id"], "collector_id": name, "collector_version": "0.1.0",
                            "source_span": plan["source_map"][node["id"]], "provenance_kind": provenance,
                            "scenario_id": "triage-v1" if provenance == "synthetic" else None,
-                           "artifact_type": name, "event_kind": row.get("event_kind", name), "event_time": event_time,
+                           "artifact_type": "network_connections" if name=="pcap" else name, "event_kind": row.get("event_kind", name), "event_time": event_time,
                            "observed_at": timestamp, "collected_at": timestamp, "received_at": timestamp,
                            "time_metadata": {"precision": "seconds" if provenance == "synthetic" else "microseconds", "uncertainty": "fixture" if provenance == "synthetic" else "unmeasured", "timestamp_meaning": "event" if event_time else "observation"},
                            "entities": {"process_key": row.get("process_key")}, "payload": row, "raw_reference": raw,
@@ -108,22 +122,17 @@ def run(source, run_id, investigation_id, cancelled=lambda: False):
                     evidence.append(rec)
                     endpoint_records.append(rec)
             elif op == "hunt":
-                result, evaluation = detection.sigma(inputs, node["id"])
+                result, evaluation = detection.sigma(inputs, node["id"],args["pack"])
                 for d in result: d["id"] = f"{endpoint}:{d['id']}"
                 detections.extend(result); coverage.append(evaluation)
             elif op == "scan":
-                result, evaluation = detection.yara(inputs, node["id"], blobs)
+                result, evaluation = detection.yara(inputs, node["id"], blobs,args["pack"])
                 for d in result: d["id"] = f"{endpoint}:{d['id']}"
                 detections.extend(result); coverage.append(evaluation)
             elif op in {"filter", "assert"}:
                 pred = args["predicate"]
-                selected = []
-                for record in inputs:
-                    current = record["payload"]
-                    for part in pred["field"].split("."):
-                        current = current.get(part) if isinstance(current, dict) else None
-                    matched = current is not None and ((str(current) == pred["value"]) if pred["op"] == "==" else (str(current) != pred["value"]) if pred["op"] == "!=" else pred["value"] in str(current))
-                    if matched: selected.append(record)
+                from .predicates import matches
+                selected = [record for record in inputs if matches(pred,record["payload"])]
                 if op == "assert" and (not inputs or len(selected) != len(inputs)):
                     raise ValueError("Assertion failed (empty dataset or predicate mismatch)")
                 result = selected

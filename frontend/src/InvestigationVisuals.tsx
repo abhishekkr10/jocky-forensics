@@ -6,6 +6,28 @@ type Row = Record<string, any>;
 const digest = (value?: string) => value ? `${value.slice(0, 8)}…` : 'Unavailable';
 const stamp = (value?: string) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : 'Not recorded';
 
+export function EvidenceChainExplorer({workspace,evidence,onEvidence,onIntegrity}:{workspace:Row;evidence:Row[];onEvidence:(id:string)=>void;onIntegrity:()=>void}) {
+  const [selected,setSelected]=useState('');
+  const detections:Row[]=workspace.detections||[];
+  const detection=detections.find(d=>d.id===selected)||detections[0];
+  const related=evidence.filter(row=>detection?.evidence_ids?.includes(row.evidence_id));
+  const [recordId,setRecordId]=useState('');
+  const record=related.find(row=>row.evidence_id===recordId)||related[0];
+  return <section className="panel evidence-explorer">
+    <div className="panel-heading"><div><h2>Evidence chain explorer</h2><p className="panel-note">Detection → supporting observation → record digest → bundle verification. Relationships establish support, not causation.</p></div></div>
+    {!detection?<p className="panel-note">No detections in this run. Observations remain available in Evidence.</p>:<>
+      <div className="chain-selector"><label>Detection<select value={detection.id} onChange={event=>{setSelected(event.target.value);setRecordId('')}}>{detections.map(d=><option key={d.id} value={d.id}>{d.rule}</option>)}</select></label><span>{related.length} of {detection.evidence_ids?.length||0} supporting records loaded</span></div>
+      <div className="support-path" key={detection.id}>
+        <div><small>01 / DETECTION</small><strong>{detection.rule}</strong><code>{detection.id}</code></div>
+        <div><small>02 / SUPPORTING EVIDENCE</small>{related.map(row=><button className={record?.evidence_id===row.evidence_id?'selected':''} key={row.evidence_id} onClick={()=>setRecordId(row.evidence_id)}>{row.artifact_type} · {row.endpoint_id}</button>)}{!related.length&&<span>Supporting records are not loaded.</span>}</div>
+        <div><small>03 / OBSERVATION</small><strong>{record?.payload?.summary||record?.event_kind||'Unavailable'}</strong><code>{record?stamp(record.event_time||record.observed_at):'Not loaded'}</code>{record&&<button className="text-button" onClick={()=>onEvidence(record.evidence_id)}>Inspect original record →</button>}</div>
+        <div><small>04 / RECORD DIGEST</small><code title={record?.record_digest}>{record?.record_digest||'Not loaded'}</code><span>SHA-256 · preserved record</span></div>
+        <button onClick={onIntegrity} className="verification-node"><small>05 / BUNDLE VERIFICATION</small><strong>{workspace.verification?.integrity||'Pending'}</strong><span>Open verification and trust anchor →</span></button>
+      </div>
+    </>}
+  </section>;
+}
+
 export function Sparkline({ values, label }: { values: (number | null)[]; label: string }) {
   const known = values.filter((value): value is number => value !== null && Number.isFinite(value));
   const max = Math.max(1, ...known);

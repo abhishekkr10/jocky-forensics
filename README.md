@@ -85,7 +85,7 @@ cargo run -p jocky-cli -- verify artifacts/triage/bundle.json --trusted-key arti
 cargo build --workspace --release
 ```
 
-The current Python bridge invokes the debug binary under `target/debug`, so run `cargo build --workspace` before starting the backend even if release binaries have also been built.
+The Python bridge defaults to the debug binary under `target/debug`, so run `cargo build --workspace` before starting the backend. Set `JOCKY_WORKER` to an installed release binary to use a release build.
 
 ## Configuration and evidence storage
 
@@ -94,6 +94,7 @@ The current Python bridge invokes the debug binary under `target/debug`, so run 
 | `JOCKY_DATA` | Database, reports and local runtime data | Repository-relative `data/` |
 | `JOCKY_KEY_PATH` | Ed25519 checkpoint signing key | `%APPDATA%/jocky/checkpoint.key` on Windows; `~/.config/jocky/checkpoint.key` on Unix |
 | `JOCKY_HTTPS=1` | Mark session cookies secure when serving HTTPS | Disabled for loopback development |
+| `JOCKY_WORKER` | Native worker executable | Repository-relative `target/debug/jocky` (`jocky.exe` on Windows) |
 
 Keep signing keys separate from the database and retain them when moving an installation. Verification fails if the trusted key is missing; it does not silently create a replacement. Fresh startup migrates a legacy `data/checkpoint.key` when the configured external key does not already exist. Conflicting keys require explicit resolution.
 
@@ -118,4 +119,16 @@ The browser test covers sign-in, compilation diagnostics, IR, lab execution, sou
 
 See [architecture.md](architecture.md) for data flow and trust boundaries, [CURRENT_STATUS.md](CURRENT_STATUS.md) for verified implementation state.
 
-Remote agent transport, live vulnerable-driver inventory, full disk parsing, memory-image analysis and packet capture are not implemented. Native event-log and startup collection can be partial. Sigma compatibility is limited to supported predicates. Historical checkpoint manifests without the current analysis digest are rejected; they are not automatically re-signed. Evidence integrity establishes consistency with a trusted checkpoint, not endpoint truthfulness or collection completeness.
+Authenticated agent polling and bounded PCAP metadata import are implemented; separate-host deployment and public hosting remain unverified. Live vulnerable-driver inventory, full disk parsing, memory-image analysis and live packet acquisition are not implemented. Native event-log and startup collection can be partial. Sigma compatibility is limited to supported predicates. Historical checkpoint manifests without the current analysis digest are rejected; they are not automatically re-signed. Evidence integrity establishes consistency with a trusted checkpoint, not endpoint truthfulness or collection completeness.
+
+## Persistent deployment and endpoint agents
+
+See [deployment setup](deploy/README.md) and [endpoint enrollment](deploy/agents.md). These are implemented deployment configurations; the public backend has not yet been provisioned. `JOCKY_WORKER` selects an installed native release binary while local development retains its debug default.
+
+## Language, collectors and rule packs
+
+Dataset filters support bounded Boolean expressions and typed comparisons. Reusable dataset functions expand into deterministic plans with isolated bindings; see [examples/functions.jky](examples/functions.jky). Nested calls and recursion are unsupported.
+
+Windows collectors include bounded Run/RunOnce registry inventory and Win32 service state. Ubuntu event-log collection supports bounded journal reads with text-log fallback. Classic Ethernet PCAP imports extract bounded packet metadata; PCAPNG and live capture are unsupported.
+
+Administrators can publish validated Sigma and YARA-X packs from **Rule Packs**. Scripts pin immutable identifiers whose digest binds engine, version and source. Publication does not automatically activate a pack. See [verification and collection limits](deploy/verification.md) for supported syntax, trust requirements and coverage limits.

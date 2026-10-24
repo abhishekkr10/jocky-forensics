@@ -1,5 +1,6 @@
 use serde_json::{json,Value};
 
+#[cfg(any(windows,test))]
 pub fn parse_xml(xml:&str)->Result<Value,String>{
  use quick_xml::{Reader,events::Event};
  let mut reader=Reader::from_str(xml);reader.config_mut().trim_text(true);
@@ -67,15 +68,45 @@ pub fn collect(max:usize,args:&Value)->Result<Value,String>{
 
 #[cfg(not(windows))]
 pub fn collect(max:usize,_args:&Value)->Result<Value,String>{
- use std::io::{BufRead,BufReader};
+ use std::io::{BufRead,BufReader,Read};
  let mut rows=vec![];let mut warnings=vec![];let mut bytes=0;
+ if let Ok(mut child)=std::process::Command::new("journalctl").args(["--output=json","--no-pager","--reverse","--lines",&max.to_string(),"--since","24 hours ago"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn(){
+  use std::io::Read;
+  let stdout=child.stdout.take().ok_or("Journal output unavailable")?;
+  let (sender,receiver)=std::sync::mpsc::channel();
+  std::thread::spawn(move||{let mut data=vec![];let result=stdout.take(1048577).read_to_end(&mut data).map(|_|data);let _=sender.send(result);});
+  match receiver.recv_timeout(std::time::Duration::from_secs(10)){
+   Ok(Ok(data))=>{
+    let truncated=data.len()>1048576;
+    if truncated{let _=child.kill();warnings.push("Journal byte limit reached".into());}
+    let status=child.wait().map_err(|e|e.to_string())?;
+    if status.success()||truncated{
+     for line in data[..data.len().min(1048576)].split(|b|*b==b'\n').filter(|line|!line.is_empty()){
+      if rows.len()>=max{break}
+      match serde_json::from_slice::<Value>(line){Ok(raw)=>rows.push(journal_row(raw)),Err(_)=>warnings.push("Malformed or truncated journal entry skipped".into())}
+     }
+     warnings.push("Coverage: accessible journal entries from the last 24 hours; journal permissions may restrict visibility".into());
+     return Ok(json!({"rows":rows,"status":"partial","warnings":warnings}));
+    }
+    warnings.push("Journal unavailable; falling back to bounded text logs".into());
+   },
+   _=>{let _=child.kill();let _=child.wait();warnings.push("Journal read failed or timed out; falling back to text logs".into());}
+  }
+ }
  for path in ["/var/log/auth.log","/var/log/syslog"]{
-  match std::fs::File::open(path){Ok(file)=>{let mut reader=BufReader::new(file);let mut buf=Vec::new();loop{if rows.len()>=max||bytes>=1048576{warnings.push("Log byte/record limit reached".into());break}buf.clear();let n=reader.read_until(b'\n',&mut buf).map_err(|e|e.to_string())?;if n==0{break}bytes+=n;if n>65536{warnings.push("Oversized log line skipped".into());continue}rows.push(json!({"path":path,"event_kind":"linux_log","product":"linux","message":String::from_utf8_lossy(&buf),"summary":"Linux log record; original timestamp retained in message"}));}},Err(e)=>warnings.push(format!("{path}: {e}"))}
+  match std::fs::File::open(path){Ok(file)=>{let mut reader=BufReader::new(file);let mut buf=Vec::new();loop{if rows.len()>=max||bytes>=1048576{warnings.push("Log byte/record limit reached".into());break}buf.clear();let n=reader.by_ref().take(65537).read_until(b'\n',&mut buf).map_err(|e|e.to_string())?;if n==0{break}bytes+=n;if n>65536{warnings.push("Oversized log line: remaining file skipped".into());break}rows.push(json!({"path":path,"event_kind":"linux_log","product":"linux","message":String::from_utf8_lossy(&buf),"summary":"Linux log record; original timestamp retained in message"}));}},Err(e)=>warnings.push(format!("{path}: {e}"))}
  }
  warnings.push("Coverage: bounded text log import; journal-only systems require an importer. Time-window filtering unavailable for unparsed text timestamps.".into());
  Ok(json!({"rows":rows,"status":"partial","warnings":warnings}))
 }
 
+#[cfg(any(not(windows),test))]
+pub fn journal_row(raw:Value)->Value{
+ let timestamp=raw["__REALTIME_TIMESTAMP"].as_str().and_then(|v|v.parse::<u64>().ok());
+ json!({"event_kind":"linux_journal","product":"linux","event_time_unix_us":timestamp,"unit":raw["_SYSTEMD_UNIT"],"pid":raw["_PID"],"message":raw["MESSAGE"],"summary":raw["MESSAGE"].as_str().unwrap_or("Journal entry"),"raw_journal":raw})
+}
+
 #[cfg(test)]mod tests{use super::*;
+ #[test]fn journal_timestamp_preserved(){let row=journal_row(json!({"__REALTIME_TIMESTAMP":"1700000000123456","MESSAGE":"Service started","_SYSTEMD_UNIT":"example.service"}));assert_eq!(row["event_time_unix_us"],1700000000123456u64);assert_eq!(row["unit"],"example.service");assert!(journal_row(json!({}))["event_time_unix_us"].is_null());}
  #[test]fn maps_sysmon_without_inventing_fields(){let v=parse_xml(r#"<Event><System><Provider Name="Microsoft-Windows-Sysmon"/><EventID>1</EventID><TimeCreated SystemTime="2026-09-30T00:00:00Z"/></System><EventData><Data Name="Image">C:\Windows\powershell.exe</Data><Data Name="ProcessGuid">guid</Data></EventData></Event>"#).unwrap();assert_eq!(v["event_kind"],"process_creation");assert_eq!(v["process_key"],"guid");assert!(v.get("CommandLine").is_none());}
 }

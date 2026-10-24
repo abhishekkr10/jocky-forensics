@@ -1,0 +1,29 @@
+services:
+  console:
+    build: .
+    restart: unless-stopped
+    environment:
+      JOCKY_HTTPS: "1"
+    volumes:
+      - evidence:/var/lib/jocky/data
+      - signing-keys:/var/lib/jocky/keys
+    networks: [private]
+  gateway:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      JOCKY_DOMAIN: ${JOCKY_DOMAIN:?Set JOCKY_DOMAIN to your backend domain}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy-config:/config
+    networks: [private]
+    depends_on: [console]
+networks:
+  private:
+volumes:
+  evidence:
+  signing-keys:
+  certificates:
+  caddy-config:

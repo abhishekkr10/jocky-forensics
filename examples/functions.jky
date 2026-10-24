@@ -1,0 +1,11 @@
+function select_shell(input)
+filter input where name == "powershell.exe" and pid > 100 as selected
+return selected
+end
+
+mode lab
+collect processes as p
+call select_shell(p) as shells
+assert shells where pid == 4242
+export shells json "selected-processes.json"
+verify evidence

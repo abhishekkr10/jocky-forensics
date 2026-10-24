@@ -40,18 +40,24 @@ def compile_sigma(text):
     for name, selection in document.get("detection", {}).items():
         if name == "condition":
             continue
-        if not isinstance(selection, dict):
-            raise Unsupported("Only field-based selections are supported")
-        for field in selection:
-            if any(m not in {"contains", "startswith", "endswith", "all"} for m in field.split("|")[1:]):
-                raise Unsupported(f"Unsupported modifier in {field}")
+        selections=selection if isinstance(selection,list) else [selection]
+        if not selections or any(not isinstance(item,dict) for item in selections):
+            raise Unsupported("Only field-based selections and lists of field selections are supported")
+        for item in selections:
+            for field in item:
+                if not isinstance(field,str) or any(m not in {"contains", "startswith", "endswith", "all"} for m in field.split("|")[1:]):
+                    raise Unsupported(f"Unsupported modifier in {field}")
     rule = SigmaRule.from_yaml(text)
     conditions = [lower(c.parsed) for c in rule.detection.parsed_condition]
     return rule, conditions[0] if len(conditions) == 1 else {"op": "or", "args": conditions}
 
-def sigma(records, operation_id):
+def sigma(records, operation_id, pack="triage-v1"):
+    version="1.0.0"
     text = (ROOT / "rules/sigma/encoded_script.yml").read_text()
     pack_digest = hashlib.sha256(text.encode()).hexdigest()
+    if pack!="triage-v1":
+        from .rulepacks import load
+        published=load(pack);text=published["source"];version=published["version"];pack_digest=published["digest"]
     try:
         rule, predicate = compile_sigma(text)
     except Unsupported as exc:
@@ -68,10 +74,10 @@ def sigma(records, operation_id):
     if not eligible and not indicator_records:
         return [], {"engine": "Sigma", "state": "insufficient_telemetry", "pack_digest": pack_digest}
     matches = native("predicate", {"predicate": predicate, "events": [r["payload"] for r in eligible]})["matches"] if eligible else []
-    hits = [{"id": f"sigma-{operation_id}-{i}", "engine": "Sigma", "rule": rule.title, "rule_id": str(rule.id), "rule_pack_id": "triage-v1", "rule_pack_version": "1.0.0", "rule_pack_digest": pack_digest,
-             "severity": "medium", "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
+    hits = [{"id": f"sigma-{operation_id}-{i}", "engine": "Sigma", "rule": rule.title, "rule_id": str(rule.id), "rule_pack_id": pack, "rule_pack_version": version, "rule_pack_digest": pack_digest,
+             "severity": getattr(rule.level,"name","medium").lower(), "evidence_ids": [r["evidence_id"]], "operation_id": operation_id,
              "pack_digest": pack_digest, "engine_version": importlib.metadata.version("pysigma"),
-             "provenance_kind": r["provenance_kind"], "reason": "Image ends with powershell.exe and command line contains EncodedCommand"}
+             "provenance_kind": r["provenance_kind"], "reason": "Event matches the compiled Sigma field predicate"}
             for i, (r, match) in enumerate(zip(eligible, matches)) if match]
     sigma_hit_count = len(hits)
     # Explicit telemetry classification, separate from evaluated Sigma rules.
@@ -87,8 +93,13 @@ def sigma(records, operation_id):
                          "provenance_kind": r["provenance_kind"], "reason": reason})
     return hits, {"engine": "Sigma", "state": "matched" if sigma_hit_count else "evaluated_no_match" if eligible else "insufficient_telemetry", "evaluated": len(eligible), "excluded": len(records)-len(eligible), "pack_digest": pack_digest}
 
-def yara(records, operation_id, blobs):
+def yara(records, operation_id, blobs, pack="demo-v1"):
+    version="1.0.0"
     text = (ROOT / "rules/yara/demo.yar").read_text()
+    pack_digest=hashlib.sha256(text.encode()).hexdigest()
+    if pack!="demo-v1":
+        from .rulepacks import load
+        published=load(pack);text=published["source"];version=published["version"];pack_digest=published["digest"]
     rules = yara_x.compile(text)
     scanner = yara_x.Scanner(rules)
     scanner.set_timeout(5)
@@ -105,9 +116,9 @@ def yara(records, operation_id, blobs):
             for pattern in match.patterns:
                 for m in pattern.matches:
                     offsets.append({"offset": m.offset, "length": m.length})
-            hits.append({"id": f"yara-{operation_id}-{len(hits)}", "engine": "YARA-X", "rule": match.identifier, "rule_pack_id": "demo-v1", "rule_pack_version": "1.0.0", "rule_pack_digest": hashlib.sha256(text.encode()).hexdigest(),
+            hits.append({"id": f"yara-{operation_id}-{len(hits)}", "engine": "YARA-X", "rule": match.identifier, "rule_pack_id": pack, "rule_pack_version": version, "rule_pack_digest": pack_digest,
                          "namespace": match.namespace, "severity": "low", "evidence_ids": [record["evidence_id"]],
                          "operation_id": operation_id, "scanned_sha256": digest, "offsets": offsets,
-                         "pack_digest": hashlib.sha256(text.encode()).hexdigest(), "engine_version": importlib.metadata.version("yara-x"),
-                         "provenance_kind": record["provenance_kind"], "reason": "Harmless demonstration marker found in captured file bytes"})
+                         "pack_digest": pack_digest, "engine_version": importlib.metadata.version("yara-x"),
+                         "provenance_kind": record["provenance_kind"], "reason": "YARA pattern matched preserved file bytes"})
     return hits, {"engine": "YARA-X", "state": "matched" if hits else "evaluated_no_match", "evaluated": len(records)}

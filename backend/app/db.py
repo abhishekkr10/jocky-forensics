@@ -15,6 +15,8 @@ def _ensure_schema(db):
     if version < 2:
         db.executescript((ROOT / "backend/migrations/002_analysis_records.sql").read_text())
         db.execute("INSERT INTO schema_migrations VALUES(2)")
+    if version < 3:
+        db.executescript((ROOT / "backend/migrations/003_agents.sql").read_text())
 
 @contextmanager
 def connection():

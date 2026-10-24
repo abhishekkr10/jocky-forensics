@@ -21,9 +21,15 @@ POOL = ThreadPoolExecutor(max_workers=2)
 @asynccontextmanager
 async def lifespan(app):
     initialize(); bootstrap(); integrity.signing_key()
+    with connection() as db:
+        db.execute("UPDATE agent_tasks SET status='interrupted',error='Server restarted during execution' WHERE status IN ('queued','running')")
     yield
 
 app = FastAPI(title="JOCKY forensic investigation API",version="0.1.0",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+from .agents import router as agent_router
+app.include_router(agent_router)
+from .rulepacks import router as rulepack_router
+app.include_router(rulepack_router)
 
 @app.middleware("http")
 async def boundaries(request: Request, call_next):
@@ -112,7 +118,7 @@ def endpoints(user=Depends(current_user)):
     with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM endpoints ORDER BY id")]
     for r in rows:
         r["capabilities"]=json.loads(r["capabilities"])
-        r["status"]="lab fixture" if r["kind"]=="synthetic" else "last local observation"
+        r["status"]="lab fixture" if r["kind"]=="synthetic" else "last remote observation" if r["kind"]=="remote" else "last local observation"
     return rows
 
 @app.post("/api/v1/investigations",status_code=201)
@@ -227,14 +233,21 @@ def evidence(id:str,offset:int=0,limit:int=200,user=Depends(current_user)):
 def detections(id:str,user=Depends(current_user)): return latest_bundle(id,user)["detections"]
 @app.get("/api/v1/investigations/{id}/timeline")
 def timeline(id:str,user=Depends(current_user)):
+    bundle=latest_bundle(id,user)
     job=latest_job(id,user)
     with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM timeline_events WHERE analysis_run_id=? ORDER BY COALESCE(event_time,observed_at),timeline_event_id",(job["id"],))]
     for r in rows:
         r["evidence_ids"]=json.loads(r["evidence_ids"]);r["detection_ids"]=json.loads(r["detection_ids"])
         r["time_kind"]=r["timestamp_meaning"];r["provenance_kind"]=r["provenance"]
+    fields=("endpoint_id","event_time","observed_at","time_kind","uncertainty","event_type","evidence_ids","detection_ids","provenance_kind","summary")
+    expected=[{k:e.get(k, {"endpoint_id":"unknown","time_kind":"observation","uncertainty":"unmeasured","event_type":"observation","evidence_ids":[],"detection_ids":[],"provenance_kind":"unknown","summary":""}.get(k)) for k in fields} for e in bundle["analysis"].get("timeline",[])]
+    actual=[{k:r[k] for k in fields} for r in rows]
+    if sorted(map(lambda r:json.dumps(r,sort_keys=True),actual))!=sorted(map(lambda r:json.dumps(r,sort_keys=True),expected)):
+        raise HTTPException(409,"Stored timeline differs from signed analysis")
     return rows
 @app.get("/api/v1/investigations/{id}/correlations")
 def correlations(id:str,user=Depends(current_user)):
+    bundle=latest_bundle(id,user)
     job=latest_job(id,user)
     with connection() as db: rows=[dict(r) for r in db.execute("SELECT * FROM correlations WHERE analysis_run_id=? ORDER BY created_at,correlation_id",(job["id"],))]
     for r in rows:
@@ -242,6 +255,12 @@ def correlations(id:str,user=Depends(current_user)):
         r["source"]=r["source_evidence_ids"][0] if r["source_evidence_ids"] else "";r["target"]=r["target_evidence_ids"][0] if r["target_evidence_ids"] else ""
         r["evidence_ids"]=list(dict.fromkeys(r["source_evidence_ids"]+r["target_evidence_ids"]))
         r["profile"]=r["profile_version"]
+    expected=[]
+    for edge in bundle["analysis"].get("edges",[]):
+        expected.append({"source_evidence_ids":edge.get("evidence_ids",[edge.get("source")])[:1],"target_evidence_ids":edge.get("evidence_ids",[edge.get("target")])[1:2] or [edge.get("target")],"reason":edge.get("reason",""),"confidence":edge.get("confidence","unknown"),"profile":edge.get("profile","triage-v1")})
+    actual=[{k:r[k] for k in ("source_evidence_ids","target_evidence_ids","reason","confidence","profile")} for r in rows]
+    if sorted(map(lambda r:json.dumps(r,sort_keys=True),actual))!=sorted(map(lambda r:json.dumps(r,sort_keys=True),expected)):
+        raise HTTPException(409,"Stored correlations differ from signed analysis")
     return rows
 @app.get("/api/v1/investigations/{id}/processes")
 def processes(id:str,user=Depends(current_user)): return [r for r in engine.records(latest_bundle(id,user)) if r["artifact_type"]=="processes"]
@@ -286,7 +305,14 @@ def audits(user=Depends(current_user)):
     with connection() as db: return [dict(r) for r in db.execute("SELECT action,subject,created_at FROM audit_logs WHERE ?='administrator' OR user_id=? ORDER BY id DESC LIMIT 100",(user["role"],user["id"]))]
 @app.get("/api/v1/rule-packs")
 def rules(user=Depends(current_user)):
-    return [{"pack_id":name,"id":name,"name":path.stem,"version":"1.0.0","engine":eng,"engine_version":"pysigma" if eng=="Sigma" else "yara-x","compatibility_profile":"bounded-field-predicate" if eng=="Sigma" else "yara-x-native","digest":hashlib.sha256(path.read_bytes()).hexdigest(),"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"rules":[path.stem],"source":path.read_text()} for name,eng,path in [("triage-v1","Sigma",ROOT/"rules/sigma/encoded_script.yml"),("demo-v1","YARA-X",ROOT/"rules/yara/demo.yar")]]
+    builtin=[{"pack_id":name,"id":name,"name":path.stem,"version":"1.0.0","engine":eng,"engine_version":"pysigma" if eng=="Sigma" else "yara-x","compatibility_profile":"bounded-field-predicate" if eng=="Sigma" else "yara-x-native","digest":hashlib.sha256(path.read_bytes()).hexdigest(),"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"rules":[path.stem],"source":path.read_text()} for name,eng,path in [("triage-v1","Sigma",ROOT/"rules/sigma/encoded_script.yml"),("demo-v1","YARA-X",ROOT/"rules/yara/demo.yar")]]
+    from .rulepacks import load
+    for path in (DATA/"rule-packs").glob("*.json"):
+        try:
+            record=json.loads(path.read_text());record=load(record["id"])
+        except Exception: raise HTTPException(409,"Stored rule pack failed integrity validation")
+        builtin.append(record|{"pack_id":record["id"],"name":record["id"],"engine":"Sigma" if record["engine"]=="sigma" else "YARA-X","sha256":record["digest"],"rules":[record["id"]]})
+    return builtin
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","version":"0.1.0"}
 

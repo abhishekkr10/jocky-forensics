@@ -11,6 +11,9 @@ frontend/playwright-report/
 frontend/tsconfig.tsbuildinfo
 *.db
 *.db-*
+*.pcap
+*.pcapng
+agent.json
 .env
 *.pem
 *.key

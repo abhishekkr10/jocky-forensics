@@ -1,10 +1,16 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { IntegrityChain, RiskGauge, Sparkline, TimeAxis } from './InvestigationVisuals';
+import { EvidenceChainExplorer, IntegrityChain, RiskGauge, Sparkline, TimeAxis } from './InvestigationVisuals';
 import { CoverageIntelligence } from './App';
 
 describe('investigation views', () => {
+  it('does not invent supporting records in the evidence explorer', () => {
+    const html=renderToStaticMarkup(<EvidenceChainExplorer workspace={{detections:[{id:'d',rule:'Rule',evidence_ids:['missing']}]}} evidence={[]} onEvidence={()=>{}} onIntegrity={()=>{}}/>);
+    expect(html).toContain('0 of 1 supporting records loaded');
+    expect(html).toContain('Supporting records are not loaded');
+    expect(html).not.toContain('Inspect original record');
+  });
   it('keeps gaps in historical metrics instead of implying measurements', () => {
     const html = renderToStaticMarkup(<Sparkline values={[1, null, 2]} label="Recorded findings"/>);
     expect(html).toContain('1, unavailable, 2');
