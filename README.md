@@ -1,12 +1,12 @@
 # JOCKY
 
-JOCKY is a local digital-forensics investigation platform developed against the SIH26148 problem statement. A Rust compiler turns JOCKY scripts into deterministic plans. The backend coordinates bounded collection, Sigma and YARA-X evaluation, correlation, signed evidence verification and portable reports. The React console keeps each finding connected to its source and evidence.
+JOCKY is a digital-forensics investigation prototype developed for the Smart India Hackathon problem statement SIH26148. A Rust compiler turns JOCKY scripts into deterministic plans. The backend coordinates bounded collection, Sigma and YARA-X evaluation, correlation, signed evidence verification and portable reports. The React console keeps each finding connected to its source and evidence.
 
 The current implementation supports defensive, read-oriented investigations. Lab techniques generate explicitly synthetic telemetry. The project does not implement antivirus/EDR bypass, process injection, vulnerable-driver exploitation, polymorphic evasion or domain-fronted agent transport.
 
 ## Website and investigation console
 
-The [public website](https://jocky-six.vercel.app) contains product documentation and a labelled snapshot of a synthetic lab investigation. Its **Check console** link checks backend connectivity before requesting credentials. A hosted investigation backend is not yet connected to the public deployment.
+The [public website](https://jocky-six.vercel.app) contains product documentation and a labelled snapshot of a synthetic lab investigation. Its **Check console** link checks backend connectivity before requesting credentials. The investigation workflow runs through the locally hosted backend and console.
 
 The complete working console runs locally. Open `http://127.0.0.1:5173/#/app` during development, or `http://127.0.0.1:8000/#/app` after building the frontend. Hash navigation supports the existing backend static-file mount; `/app` is also recognized by frontend servers that provide SPA fallback routing.
 
@@ -56,7 +56,7 @@ npm --prefix frontend run build
 .venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Run `npm --prefix frontend run dev` in another terminal for frontend development. Ubuntu CI is configured; this release's checks were performed on Windows, so local Ubuntu execution is not claimed as newly verified.
+Run `npm --prefix frontend run dev` in another terminal for frontend development.
 
 ## Sign in
 
@@ -115,15 +115,15 @@ On Unix, use `.venv/bin/python` and `npm` for the equivalent commands. If the Pl
 
 The browser test covers sign-in, compilation diagnostics, IR, lab execution, source tracing, timeline filtering, checkpoint verification, tamper-copy detection, report generation and mobile layout. Backend and browser tests use isolated databases and signing keys. CI runs Rust, Python and frontend build/unit checks.
 
-## Architecture and current limits
+## Architecture
 
-See [architecture.md](architecture.md) for data flow and trust boundaries, [CURRENT_STATUS.md](CURRENT_STATUS.md) for verified implementation state.
+See [architecture.md](architecture.md) for the compiler, runtime, backend, frontend and evidence trust boundaries. [CURRENT_STATUS.md](CURRENT_STATUS.md) records implementation and verification details.
 
-Authenticated agent polling and bounded PCAP metadata import are implemented; separate-host deployment and public hosting remain unverified. Live vulnerable-driver inventory, full disk parsing, memory-image analysis and live packet acquisition are not implemented. Native event-log and startup collection can be partial. Sigma compatibility is limited to supported predicates. Historical checkpoint manifests without the current analysis digest are rejected; they are not automatically re-signed. Evidence integrity establishes consistency with a trusted checkpoint, not endpoint truthfulness or collection completeness.
+The prototype combines authenticated endpoint polling, bounded native collection, PCAP metadata import and signed evidence. Collection results report coverage and permission restrictions explicitly. Evidence verification establishes consistency with a trusted checkpoint; endpoint truthfulness and collection completeness are separate properties.
 
-## Persistent deployment and endpoint agents
+## Deployment configuration and endpoint agents
 
-See [deployment setup](deploy/README.md) and [endpoint enrollment](deploy/agents.md). These are implemented deployment configurations; the public backend has not yet been provisioned. `JOCKY_WORKER` selects an installed native release binary while local development retains its debug default.
+The repository includes a multi-stage Docker build, persistent evidence and signing-key volumes, and a same-origin Caddy HTTPS gateway. See [deployment setup](deploy/README.md) for infrastructure requirements and startup commands, and [endpoint enrollment](deploy/agents.md) for authenticated polling agents. `JOCKY_WORKER` selects an installed native release binary while local development retains its debug default.
 
 ## Language, collectors and rule packs
 
