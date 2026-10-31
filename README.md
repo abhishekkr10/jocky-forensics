@@ -16,10 +16,16 @@ The complete working console runs locally. Open `http://127.0.0.1:5173/#/app` du
 - Python 3.12 or later. Local verification used Python 3.13; CI is configured for Python 3.12 on Ubuntu.
 - Node.js 20 or later and npm.
 - SQLite is provided by Python's standard library.
+- The backend must be running while using the investigation console. Restart it after shutting down or restarting the host laptop.
 
 ## Windows setup
 
-From the repository root:
+Clone the repository, then run the setup commands from its root:
+
+```sh
+git clone https://github.com/abhishekkr10/jocky-forensics.git
+cd jocky-forensics
+```
 
 ```powershell
 python -m venv .venv
@@ -57,6 +63,33 @@ npm --prefix frontend run build
 ```
 
 Run `npm --prefix frontend run dev` in another terminal for frontend development.
+
+## Opening JOCKY on another laptop
+
+`127.0.0.1` and `localhost` always refer to the laptop where the browser is running. Sending someone `http://127.0.0.1:8000/#/app` does not connect them to your laptop. A connection-refused error usually means the backend is not running on that address and port. Start it with the command above, keep the terminal open and reload the page.
+
+For an independent installation, install the requirements, clone this repository and follow the Windows or Ubuntu setup on the second laptop. Start its backend and open `http://127.0.0.1:8000/#/app`. Each installation has its own accounts, signing key and case storage.
+
+### Access over the same Wi-Fi or LAN
+
+To use one running installation from another laptop on a trusted private network:
+
+1. Build the frontend on the host using `npm --prefix frontend run build`.
+2. Stop the existing loopback backend with `Ctrl+C` in its terminal, then start it from the repository root with a network-accessible binding:
+
+   ```powershell
+   .venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+   ```
+
+   On Ubuntu, use `.venv/bin/python` in place of `.venv\Scripts\python.exe`.
+
+3. Find the host's private IPv4 address using `ipconfig` on Windows or `hostname -I` on Ubuntu. Use the address of the adapter connected to the shared network.
+4. Allow inbound TCP port 8000 through the host firewall only for the trusted private network. Guest Wi-Fi or client isolation can prevent devices from connecting.
+5. On the second laptop, open `http://<host-private-ip>:8000/#/app`, replacing the placeholder with that address, and sign in using an account on the host installation. Keep the host awake and its backend running.
+
+`0.0.0.0` is a server binding, not a browser destination. This HTTP setup is for a trusted local demonstration; use the [HTTPS deployment configuration](deploy/README.md) when transmitting sensitive evidence or exposing the console beyond that network. Do not forward this HTTP port to the public internet.
+
+Opening the console from another laptop accesses the host's cases. It does not automatically collect evidence from the visiting laptop; collection from that machine requires its own installation or an [enrolled endpoint agent](deploy/agents.md). The Vercel website serves the public preview; the full workflow requires a running backend.
 
 ## Sign in
 
