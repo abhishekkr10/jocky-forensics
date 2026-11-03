@@ -1,6 +1,14 @@
 # JOCKY
 
-JOCKY is a digital-forensics investigation prototype developed for the Smart India Hackathon problem statement SIH26148. A Rust compiler turns JOCKY scripts into deterministic plans. The backend coordinates bounded collection, Sigma and YARA-X evaluation, correlation, signed evidence verification and portable reports. The React console keeps each finding connected to its source and evidence.
+Digital-forensics investigation prototype for Smart India Hackathon SIH26148.<br>
+Compile JOCKY scripts into deterministic plans with a Rust compiler and native collectors.<br>
+Investigate evidence with Sigma, YARA-X, timelines and interactive relationship graphs.<br>
+Verify signed evidence checkpoints and export HTML reports or JSON bundles.<br>
+Built with Rust, FastAPI, React/TypeScript and SQLite; includes a reproducible synthetic lab.
+
+![JOCKY investigation dashboard showing a synthetic lab investigation, evidence relationships and telemetry coverage](docs/images/investigation-dashboard.png)
+
+*Dashboard from the deterministic synthetic lab; no real machine evidence is shown.*
 
 The current implementation supports defensive, read-oriented investigations. Lab techniques generate explicitly synthetic telemetry. The project does not implement antivirus/EDR bypass, process injection, vulnerable-driver exploitation, polymorphic evasion or domain-fronted agent transport.
 
