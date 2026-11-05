@@ -1,16 +1,43 @@
 # JOCKY
 
-Digital-forensics investigation prototype for Smart India Hackathon SIH26148.<br>
-Compile JOCKY scripts into deterministic plans with a Rust compiler and native collectors.<br>
-Investigate evidence with Sigma, YARA-X, timelines and interactive relationship graphs.<br>
-Verify signed evidence checkpoints and export HTML reports or JSON bundles.<br>
-Built with Rust, FastAPI, React/TypeScript and SQLite; includes a reproducible synthetic lab.
+[![CI](https://github.com/abhishekkr10/jocky-forensics/actions/workflows/ci.yml/badge.svg)](https://github.com/abhishekkr10/jocky-forensics/actions/workflows/ci.yml)
+
+JOCKY is a defensive forensics platform that compiles investigation scripts into structured plans, analyzes evidence and verifies integrity against trusted references. Rust implements the compiler and native verification components, Python/FastAPI provides backend orchestration, and React/TypeScript provides the console.
 
 ![JOCKY investigation dashboard showing a synthetic lab investigation, evidence relationships and telemetry coverage](docs/images/investigation-dashboard.png)
 
 *Dashboard from the deterministic synthetic lab; no real machine evidence is shown.*
 
 The current implementation supports defensive, read-oriented investigations. Lab techniques generate explicitly synthetic telemetry. The project does not implement antivirus/EDR bypass, process injection, vulnerable-driver exploitation, polymorphic evasion or domain-fronted agent transport.
+
+## Script to evidence
+
+```text
+Script -> Rust compiler -> validated plan -> bounded collection / synthetic lab
+ -> analysis -> linked evidence / signed checkpoints -> console / export
+```
+
+- [Rust compiler](crates/jocky-language/src/lib.rs) exposes lexing, parsing and compilation.
+- [Stream hash verifier](crates/jocky-evidence/src/lib.rs) checks digests, links, sequence, count and chain head.
+- [Signed-job verifier](crates/jocky-runtime/src/lib.rs) checks Ed25519 signatures, expiry and plan/operation/root bindings.
+- [CLI](crates/jocky-cli/src/main.rs) dispatches compilation and bundle workflows.
+
+Hash-chain consistency, signed-job authorization and checkpoint/bundle verification are separate checks with specific trust inputs. Authentic evidence can still have incomplete collection coverage.
+
+## Shortest synthetic walkthrough
+
+Install Rust/Cargo and the supported linker first. These commands create synthetic local evidence:
+
+```sh
+cargo run -p jocky-cli -- check examples/triage.jky
+cargo run -p jocky-cli -- compile examples/triage.jky --output artifacts/triage.ir.json
+cargo run -p jocky-cli -- simulate examples/triage.jky --output artifacts/triage/bundle.json
+cargo run -p jocky-cli -- verify artifacts/triage/bundle.json --trusted-key artifacts/triage/bundle.public-key.txt
+```
+
+For this local demonstration, the generated key corresponds to the generated bundle. Evidence received from someone else requires an independently trusted public key. Preserve the original and alter a copy to demonstrate a verification failure.
+
+The reference lab has eight labelled synthetic observations, a Sigma finding and a YARA-X marker match. This demonstrates the fixture workflow, not detection accuracy or fleet-scale performance. See [verification limits](deploy/verification.md), installation below and [tests](#verification).
 
 ## Website and investigation console
 
