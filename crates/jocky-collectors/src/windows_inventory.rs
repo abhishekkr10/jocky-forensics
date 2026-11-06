@@ -25,7 +25,7 @@ pub fn registry(max:usize)->Result<Value,String>{
     if status==259{break}
     if status!=0{warnings.push(format!("Registry enumeration error {status}"));if status!=234{break}continue}
     if ![1,2].contains(&kind){continue}
-    let chars:Vec<u16>=data[..data_len as usize].chunks_exact(2).map(|v|u16::from_le_bytes([v[0],v[1]])).take_while(|v|*v!=0).collect();
+    let chars:Vec<u16>=data[..data_len as usize].as_chunks::<2>().0.iter().map(|v|u16::from_le_bytes([v[0],v[1]])).take_while(|v|*v!=0).collect();
     rows.push(json!({"registry_key":format!("{label}\\{path}"),"name":String::from_utf16_lossy(&name[..name_len as usize]),"command":String::from_utf16_lossy(&chars),"registry_type":kind,"summary":"Observed registry startup value"}));
    }
    unsafe{RegCloseKey(key);}
@@ -48,7 +48,7 @@ pub fn services(max:usize)->Result<Value,String>{
  if success==0&&error.raw_os_error()!=Some(234){return Err(error.to_string())}
  let mut rows=vec![];let mut warnings:Vec<String>=vec![];
  let base=buffer.as_ptr() as usize;let end=base+262144;
- let text=|pointer:*const u16|{let start=pointer as usize;if start<base||start>=end||start%2!=0{return String::new()}let limit=((end-start)/2).min(512);let chars=unsafe{std::slice::from_raw_parts(pointer,limit)};String::from_utf16_lossy(&chars[..chars.iter().position(|c|*c==0).unwrap_or(limit)])};
+ let text=|pointer:*const u16|{let start=pointer as usize;if start<base||start>=end||!start.is_multiple_of(2){return String::new()}let limit=((end-start)/2).min(512);let chars=unsafe{std::slice::from_raw_parts(pointer,limit)};String::from_utf16_lossy(&chars[..chars.iter().position(|c|*c==0).unwrap_or(limit)])};
  let bound=(262144/std::mem::size_of::<Service>()).min(count as usize).min(max);
  for i in 0..bound{let service=unsafe{&*buffer.as_ptr().cast::<Service>().add(i)};rows.push(json!({"name":text(service.name),"display_name":text(service.display),"state":service.status.state,"pid":service.status.pid,"summary":format!("Windows service {}",text(service.name))}));}
  if success==0||count as usize>max{warnings.push("Service enumeration truncated by buffer or record limit".into())}

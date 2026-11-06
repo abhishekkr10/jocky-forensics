@@ -38,3 +38,6 @@ with existing warnings. CLI simulation/verification passed with eight synthetic
 records and two detections. See docs/LANGUAGE_AUDIT.md. No Linguist overrides were
 added and no repository license was selected. This audit does not certify production
 hosting, separate-host agents, Linux execution or exhaustive secret absence.
+
+
+6 November follow-up: clippy cleanup separates adjacent independent if statements, simplifies escaped-string flag assignment and uses standard integer/slice helpers. `cargo clippy --workspace --all-targets --locked -- -D warnings` passes with no warnings; 23 Rust tests and 52 Python tests pass again. The historical audit above records its original baseline. No license change.

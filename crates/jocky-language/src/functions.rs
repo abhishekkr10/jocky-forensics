@@ -33,7 +33,8 @@ pub fn expand(ast:Ast)->Result<Ast,Diagnostic>{
     "filter"|"assert"|"timeline"|"risk"=>inputs.push(0),
     "compare"=>inputs.extend([0,2]),
     "hunt"|"scan"=>{if item.tokens.len()>3{inputs.push(3)}},
-    "correlate"=>{for (i,t) in item.tokens.iter().enumerate().skip(1){if t.text=="]"{break}if t.text!=","{inputs.push(i)}}},_=>{}
+    "correlate"=>{for (i,t) in item.tokens.iter().enumerate().skip(1){if t.text=="]"{break}
+ if t.text!=","{inputs.push(i)}}},_=>{}
    }
    for index in inputs{let token=item.tokens.get_mut(index).ok_or_else(||err("E270","Incomplete function operation",&statement.span))?;token.text=bindings.get(&token.text).ok_or_else(||err("E270","Function references an undefined dataset",&statement.span))?.clone();}
    if item.keyword!="assert"{

@@ -88,3 +88,8 @@ Tech Stack: Rust, Python/FastAPI, React/TypeScript, SQLite.
 Resume bullet: Compiled investigation scripts into deterministic plans in Rust; combined Rust hash-chain checks with Python Ed25519 checkpoint verification and a synthetic demo.
 
 Profile row: Rust compiler and evidence-chain checks, Python/FastAPI orchestration and Ed25519 checkpoints, and a local React/TypeScript console with a static synthetic demo.
+
+
+## Follow-up cleanup
+
+After the baseline audit, adjacent independent Rust conditions were separated for readability and four Clippy suggestions were applied. Strict `cargo clippy --workspace --all-targets --locked -- -D warnings` now passes without warnings; 23 Rust and 52 Python tests pass again. The original audit source counts and warnings describe the baseline commit, not this later formatting. No license or Linguist overrides were added.

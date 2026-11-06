@@ -56,7 +56,7 @@ pub fn collect(max:usize,args:&Value)->Result<Value,String>{
    if returned!=1||event.is_null(){break}let event=Owned(event);let mut used=0;let mut props=0;
    unsafe{EvtRender(ptr::null_mut(),event.0,1,0,ptr::null_mut(),&mut used,&mut props);}
    if used==0||used>1048576{warnings.push("Event XML exceeds bound".into());continue}
-   let mut buf=vec![0u16;(used as usize+1)/2];let capacity=used;
+   let mut buf=vec![0u16;(used as usize).div_ceil(2)];let capacity=used;
    if unsafe{EvtRender(ptr::null_mut(),event.0,1,capacity,buf.as_mut_ptr().cast(),&mut used,&mut props)}==0{warnings.push(std::io::Error::last_os_error().to_string());continue}
    let xml=String::from_utf16_lossy(&buf[..buf.iter().position(|c|*c==0).unwrap_or(buf.len())]);bytes+=xml.len();
    match parse_xml(&xml){Ok(r)=>rows.push(r),Err(e)=>warnings.push(e)}
