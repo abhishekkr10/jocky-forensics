@@ -25,3 +25,16 @@
 - Further implementation: deterministic scoped dataset functions with call-site source mapping; Windows registry startup and Win32 service state collectors; administrator-published Sigma/YARA packs pinned by engine/version/source digest and checked before execution. A bounded Windows inventory collected 36 real records and verified successfully. The current backend suite passes 52 tests.
 
 - Container verification: the native Docker stage includes built-in rules. CI defines an Ubuntu container build, API health check and native lab evidence verification. Compose configuration validates and the lab smoke command passes against the local worker. Actual container execution, production TLS and separate-host verification remain unverified; persistent backend hosting is not provisioned.
+
+
+## 6 November 2026: language and claim audit
+
+Rust is the real compiler/native collector/hash-chain implementation; Python is
+the largest source language and owns checkpoint signing/signature verification,
+orchestration and persistence. The static public preview does not execute cases.
+Fresh Windows checks: locked debug build, 23 Rust tests, 52 backend tests, frontend
+build, eight unit tests and one end-to-end investigation test passed. Clippy runs
+with existing warnings. CLI simulation/verification passed with eight synthetic
+records and two detections. See docs/LANGUAGE_AUDIT.md. No Linguist overrides were
+added and no repository license was selected. This audit does not certify production
+hosting, separate-host agents, Linux execution or exhaustive secret absence.

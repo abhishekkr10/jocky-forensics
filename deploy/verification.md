@@ -42,7 +42,15 @@ Ubuntu collection attempts `journalctl` JSON output, bounded by ten seconds, one
 
 ## Build validation
 
-CI now specifies Ubuntu and Windows jobs, Rust release artifacts and application tests. This configuration has not run for the current uncommitted changes. Container build, production TLS, separate-host agents and installation on clean machines require verification before a release claim.
+The workflow specifies Ubuntu and Windows jobs, Rust release artifacts and a
+container smoke test. Workflow configuration alone is not evidence that a remote
+run passed. A fresh Windows audit on 6 November 2026 passed the locked debug build,
+23 Rust tests, 52 Python tests, frontend build, eight frontend unit tests and the
+end-to-end investigation test. Clippy completed with warnings. The documented CLI
+check/compile/simulate/verify walkthrough produced eight synthetic records, two
+detections and a valid bundle verification. See `docs/LANGUAGE_AUDIT.md` for scope.
+Production TLS, separate-host agents and installation on clean machines still
+require independent verification before a release claim.
 
 ## Windows inventory
 
