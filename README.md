@@ -10,6 +10,41 @@ JOCKY is a defensive forensics platform that compiles investigation scripts into
 
 The current implementation supports defensive, read-oriented investigations. Lab techniques generate explicitly synthetic telemetry. The project does not implement antivirus/EDR bypass, process injection, vulnerable-driver exploitation, polymorphic evasion or domain-fronted agent transport.
 
+## Language and responsibility split
+
+This is a mixed-language application, not a Rust-only platform. GitHub correctly
+reports Python as its largest language by source bytes. Rust is a smaller but
+substantial component: it implements the language compiler, native collectors,
+stream hash-chain verification, predicate evaluation and analysis.
+
+| Component | Language | Entry point |
+| --- | --- | --- |
+| JOCKY lexer, parser and plan compiler | Rust | `crates/jocky-language/src/lib.rs` |
+| Plan schema, canonical hashing and validation | Rust | `crates/jocky-ir/src/lib.rs` |
+| Native collection and signed-job authorization | Rust | `crates/jocky-collectors`, `crates/jocky-runtime` |
+| SHA-256 stream sealing and chain verification | Rust | `crates/jocky-evidence/src/lib.rs` |
+| Predicate evaluation, correlation, timeline and risk | Rust | `crates/jocky-detection`, `crates/jocky-analysis` |
+| Investigation orchestration, detection adapters, accounts and SQLite | Python/FastAPI | `backend/app/engine.py`, `detection.py`, `main.py` |
+| Ed25519 checkpoint creation and signature verification | Python/cryptography | `backend/app/integrity.py` |
+| Local console and static synthetic public preview | React/TypeScript | `frontend/src/App.tsx`, `Showcase.tsx` |
+
+Checkpoint signatures and signed collection jobs are different contracts. Python
+signs both; Rust verifies collection-job signatures and stream chains. Python
+verifies checkpoint signatures and signed bundle metadata, then calls Rust to
+verify each stream. The Rust CLI delegates simulation and whole-bundle verification
+to the Python pipeline; these commands require the repository's `.venv`.
+
+For identical source, compiler version and built-in rule bytes, the compiler emits
+the same plan and digest. The existing `jocky-language::tests::deterministic` test
+checks repeat compilation, and `jocky-ir::tests::canonical_key_order` checks object
+key ordering. This does not promise identical live evidence, run IDs or signatures
+across investigations, or identical plans across compiler/rule changes.
+
+Collection is read-oriented and bounded by collector-specific record, path,
+byte and time controls plus a worker timeout. Plan limit metadata is not a universal
+OS-enforced CPU/memory quota; some system inventory APIs enumerate before truncation.
+See [collection limits](deploy/verification.md) for the implemented scope.
+
 ## Script to evidence
 
 ```text
@@ -26,7 +61,22 @@ Hash-chain consistency, signed-job authorization and checkpoint/bundle verificat
 
 ## Shortest synthetic walkthrough
 
-Install Rust/Cargo and the supported linker first. These commands create synthetic local evidence:
+Install Rust/Cargo and the supported linker, then create the Python environment
+from the repository root before running the walkthrough. On Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.lock
+```
+
+On Ubuntu:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.lock
+```
+
+These commands create synthetic local evidence:
 
 ```sh
 cargo run -p jocky-cli -- check examples/triage.jky
@@ -200,3 +250,9 @@ Dataset filters support bounded Boolean expressions and typed comparisons. Reusa
 Windows collectors include bounded Run/RunOnce registry inventory and Win32 service state. Ubuntu event-log collection supports bounded journal reads with text-log fallback. Classic Ethernet PCAP imports extract bounded packet metadata; PCAPNG and live capture are unsupported.
 
 Administrators can publish validated Sigma and YARA-X packs from **Rule Packs**. Scripts pin immutable identifiers whose digest binds engine, version and source. Publication does not automatically activate a pack. See [verification and collection limits](deploy/verification.md) for supported syntax, trust requirements and coverage limits.
+
+## Source license
+
+No project-wide `LICENSE` file has been selected. Public source visibility does
+not grant a general reuse license. Third-party font licenses remain under
+`frontend/src/assets/fonts`; they do not license the JOCKY application.

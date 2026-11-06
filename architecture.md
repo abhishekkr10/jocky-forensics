@@ -19,6 +19,13 @@ FastAPI owns authentication, SQLite persistence and jobs. React/TypeScript/Vite 
 - frontend: editor, workspace, evidence/detection trace, timeline, integrity, reports.
 
 ## Integrity and trust
+Python `integrity.checkpoint` signs checkpoint manifests with Ed25519 and
+`integrity.verify` verifies their signatures, signed analysis metadata and expected
+streams. It delegates SHA-256 stream-chain verification to Rust `jocky-evidence`.
+Rust `jocky-runtime::verify_job` verifies the separate signed collection-job contract;
+it is not the checkpoint signature verifier. CLI whole-bundle verification uses
+the Python pipeline.
+
 Canonical JSON uses sorted keys, integer/string values and explicit nulls. SHA-256 chain binds stream identity, sequence and record digest. A signed completion checkpoint binds expected streams/counts/heads and the analysis digest, including run identity, mode and captured blobs. Workspace, evidence, detection, timeline, correlation and report reads use the verified bundle. Normalized timeline and correlation tables are retained for indexing but are not authoritative API results. Independently retained public key/checkpoint is the trust anchor. Integrity and collection completeness are separate. A signature does not establish endpoint truthfulness.
 
 ## Deployment
